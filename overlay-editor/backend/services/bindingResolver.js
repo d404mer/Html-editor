@@ -30,8 +30,7 @@ function resolveObjectBinding(project, obj, binding) {
     const raw = resolveBindingFromFile(filePath, binding)
     if (obj.type === 'image' || obj.type === 'gif') {
       const asset = project.assets.find((a) => a.id === obj.assetId)
-
-      const value = resolveImageDisplayPath(raw, binding, asset?.path);
+      const value = resolveImageDisplayPath(raw, binding, asset?.path)
 
       // Добавляем строки отладки
       excelDebug('resolve image: raw', { objectId: obj.id, file: dataFile.name, binding, raw });
@@ -39,10 +38,6 @@ function resolveObjectBinding(project, obj, binding) {
 
       excelDebug('resolve image: value', { objectId: obj.id, file: dataFile.name, binding, value });
       console.log('resolveImageDisplayPath: value:', value);
-
-      // Добавляем строки отладки для проверки пути
-      excelDebug('resolve image: asset path', { objectId: obj.id, assetPath: asset?.path });
-      console.log('resolveImageDisplayPath: asset path:', asset?.path);
 
       return value
     }
