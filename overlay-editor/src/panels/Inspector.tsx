@@ -1,6 +1,11 @@
+import { useEffect } from 'react'
 import { useProjectStore } from '../store/projectStore'
-import type { CanvasObject, ObjectFit } from '../types/project'
+import type { CanvasObject, ObjectFit, TextBinding } from '../types/project'
 import { DEFAULT_CROP, DEFAULT_IMAGE_FILTERS } from '../types/project'
+import { useExcelSchema, defaultBinding } from '../hooks/useExcelSchema'
+import { useExcelValues, getObjectDisplayText } from '../hooks/useExcelValues'
+import { cellRef } from '../utils/excel'
+import type { SheetSchema } from '../hooks/useExcelSchema'
 
 function NumberField({
   label,
@@ -144,6 +149,251 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       <h3 className="inspector-section-title">{title}</h3>
       <div className="inspector-fields">{children}</div>
     </section>
+  )
+}
+
+function ExcelPreviewTable({
+  sheet,
+  binding,
+  onPickColumn,
+  onPickCell,
+}: {
+  sheet: SheetSchema
+  binding: TextBinding
+  onPickColumn: (column: string) => void
+  onPickCell: (cell: string, column: string, row: number) => void
+}) {
+  if (!sheet.headers.length) return null
+
+  return (
+    <div className="excel-preview-wrap">
+      <span className="field-label">Выбор поля — клик по ячейке</span>
+      <div className="excel-preview-scroll">
+        <table className="excel-preview-table">
+          <thead>
+            <tr>
+              <th className="excel-row-num">#</th>
+              {sheet.headers.map((h) => (
+                <th
+                  key={h}
+                  className={
+                    binding.mode === 'column' && binding.column === h
+                      ? 'excel-cell-active'
+                      : ''
+                  }
+                  onClick={() => onPickColumn(h)}
+                  title={`Столбец «${h}»`}
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {sheet.sampleRows.map((row, rowIdx) => {
+              const sheetRow = rowIdx + 2
+              return (
+                <tr key={sheetRow}>
+                  <td className="excel-row-num">{sheetRow}</td>
+                  {row.map((cell, colIdx) => {
+                    const header = sheet.headers[colIdx] ?? ''
+                    const ref = cellRef(colIdx, sheetRow)
+                    const isActive =
+                      (binding.mode === 'cell' && binding.cell === ref) ||
+                      (binding.mode === 'column' &&
+                        binding.column === header &&
+                        binding.row === sheetRow)
+                    return (
+                      <td
+                        key={`${sheetRow}-${colIdx}`}
+                        className={isActive ? 'excel-cell-active' : ''}
+                        onClick={() => onPickCell(ref, header, sheetRow)}
+                        title={ref}
+                      >
+                        {cell || '—'}
+                      </td>
+                    )
+                  })}
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function ExcelBindingInspector({ object }: { object: CanvasObject }) {
+  const project = useProjectStore((s) => s.project)
+  const setTextBinding = useProjectStore((s) => s.setTextBinding)
+  const setLeftPanelTab = useProjectStore((s) => s.setLeftPanelTab)
+  const excelValues = useExcelValues()
+
+  const binding = object.textBinding
+  const dataFiles = project.dataFiles ?? []
+  const { schema, loading } = useExcelSchema(binding?.fileId)
+
+  const currentSheet = schema?.sheets.find((s) => s.name === binding?.sheet)
+  const preview = getObjectDisplayText(object, excelValues)
+
+  useEffect(() => {
+    if (!binding || !schema || binding.sheet) return
+    const first = schema.sheets[0]?.name
+    if (first) setTextBinding(object.id, { ...binding, sheet: first })
+  }, [binding, schema, object.id, setTextBinding])
+
+  useEffect(() => {
+    if (!binding || !currentSheet || binding.mode !== 'column') return
+    if (binding.column || !currentSheet.headers.length) return
+    setTextBinding(object.id, {
+      ...binding,
+      column: currentSheet.headers[0],
+    })
+  }, [binding, currentSheet, object.id, setTextBinding])
+
+  const updateBinding = (patch: Partial<TextBinding>) => {
+    if (!binding) return
+    setTextBinding(object.id, { ...binding, ...patch })
+  }
+
+  const enableBinding = () => {
+    const file = dataFiles[0]
+    if (!file) {
+      setLeftPanelTab('data')
+      return
+    }
+    setTextBinding(object.id, defaultBinding(file.id, ''))
+  }
+
+  return (
+    <Section title="Excel">
+      <ToggleField
+        label="Привязка к Excel"
+        checked={!!binding}
+        onChange={(enabled) => {
+          if (enabled) enableBinding()
+          else setTextBinding(object.id, undefined)
+        }}
+      />
+
+      {!binding && dataFiles.length === 0 && (
+        <span className="field-hint">
+          Добавьте Excel в панели «Данные» или положите файл в папку data проекта
+        </span>
+      )}
+
+      {binding && (
+        <>
+          <SelectField
+            label="Файл"
+            value={binding.fileId}
+            options={[
+              { value: '', label: '— выберите —' },
+              ...dataFiles.map((f) => ({ value: f.id, label: f.name })),
+            ]}
+            onChange={(fileId) => {
+              const file = dataFiles.find((f) => f.id === fileId)
+              if (file) {
+                setTextBinding(object.id, defaultBinding(file.id, ''))
+              }
+            }}
+          />
+
+          {loading && <span className="field-hint">Загрузка схемы…</span>}
+
+          {schema && (
+            <SelectField
+              label="Лист"
+              value={binding.sheet}
+              options={[
+                { value: '', label: '— выберите —' },
+                ...schema.sheets.map((s) => ({ value: s.name, label: s.name })),
+              ]}
+              onChange={(sheet) => updateBinding({ sheet })}
+            />
+          )}
+
+          <SelectField
+            label="Режим"
+            value={binding.mode}
+            options={[
+              { value: 'column', label: 'Поле (столбец)' },
+              { value: 'cell', label: 'Ячейка' },
+            ]}
+            onChange={(mode) =>
+              updateBinding({
+                mode: mode as TextBinding['mode'],
+              })
+            }
+          />
+
+          {binding.mode === 'cell' ? (
+            <TextField
+              label="Ячейка"
+              value={binding.cell ?? 'A1'}
+              onChange={(cell) => updateBinding({ cell: cell.toUpperCase() })}
+            />
+          ) : (
+            <>
+              <SelectField
+                label="Столбец"
+                value={binding.column ?? ''}
+                options={[
+                  { value: '', label: '— выберите —' },
+                  ...(currentSheet?.headers ?? []).map((h) => ({
+                    value: h,
+                    label: h,
+                  })),
+                ]}
+                onChange={(column) => updateBinding({ column })}
+              />
+              <NumberField
+                label="Строка"
+                value={binding.row ?? 2}
+                min={2}
+                max={currentSheet ? currentSheet.rowCount + 1 : 9999}
+                onChange={(row) => updateBinding({ row })}
+              />
+              <span className="field-hint">Строка 1 — заголовки столбцов</span>
+            </>
+          )}
+
+          <TextField
+            label="Fallback"
+            value={binding.fallback ?? ''}
+            onChange={(fallback) => updateBinding({ fallback })}
+          />
+
+          <label className="field">
+            <span className="field-label">Текущее значение (из Excel)</span>
+            <input
+              type="text"
+              className="field-input"
+              value={preview}
+              readOnly
+            />
+          </label>
+
+          {currentSheet && (
+            <ExcelPreviewTable
+              sheet={currentSheet}
+              binding={binding}
+              onPickColumn={(column) =>
+                updateBinding({ mode: 'column', column, row: binding.row ?? 2 })
+              }
+              onPickCell={(cell, column, row) => {
+                if (binding.mode === 'cell') {
+                  updateBinding({ mode: 'cell', cell, column, row })
+                } else {
+                  updateBinding({ mode: 'column', column, row })
+                }
+              }}
+            />
+          )}
+        </>
+      )}
+    </Section>
   )
 }
 
@@ -327,6 +577,7 @@ function ImageInspector({ object }: { object: CanvasObject }) {
 function ObjectInspector({ object }: { object: CanvasObject }) {
   const updateObject = useProjectStore((s) => s.updateObject)
   const updateObjectStyle = useProjectStore((s) => s.updateObjectStyle)
+  const setEditingTextId = useProjectStore((s) => s.setEditingTextId)
 
   const patch = (data: Partial<CanvasObject>) => updateObject(object.id, data)
   const patchStyle = (key: string, value: string | number | boolean) =>
@@ -387,55 +638,82 @@ function ObjectInspector({ object }: { object: CanvasObject }) {
       </Section>
 
       {object.type === 'text' && (
-        <Section title="Текст">
-          <TextField
-            label="Содержимое"
-            value={object.text ?? ''}
-            onChange={(text) => patch({ text })}
-          />
-          <NumberField
-            label="Font Size"
-            value={object.style.fontSize ?? 16}
-            min={1}
-            onChange={(fontSize) => patchStyle('fontSize', fontSize)}
-          />
-          <ColorField
-            label="Color"
-            value={object.style.color ?? '#ffffff'}
-            onChange={(color) => patchStyle('color', color)}
-          />
-          <TextField
-            label="Font Family"
-            value={object.style.fontFamily ?? 'Inter, sans-serif'}
-            onChange={(fontFamily) => patchStyle('fontFamily', fontFamily)}
-          />
-          <NumberField
-            label="Font Weight"
-            value={Number(object.style.fontWeight ?? 400)}
-            min={100}
-            max={900}
-            step={100}
-            onChange={(fontWeight) => patchStyle('fontWeight', fontWeight)}
-          />
-          <NumberField
-            label="Line Height"
-            value={object.style.lineHeight ?? 1.2}
-            min={0.5}
-            max={5}
-            step={0.1}
-            onChange={(lineHeight) => patchStyle('lineHeight', lineHeight)}
-          />
-          <SelectField
-            label="Text Align"
-            value={object.style.textAlign ?? 'left'}
-            options={[
-              { value: 'left', label: 'left' },
-              { value: 'center', label: 'center' },
-              { value: 'right', label: 'right' },
-            ]}
-            onChange={(v) => patchStyle('textAlign', v)}
-          />
-        </Section>
+        <>
+          <Section title="Текст">
+            {object.textBinding ? (
+              <>
+                <TextField
+                  label="Fallback (если Excel пуст)"
+                  value={object.textBinding.fallback ?? ''}
+                  onChange={(fallback) =>
+                    patch({
+                      textBinding: { ...object.textBinding!, fallback },
+                    })
+                  }
+                />
+                <span className="field-hint">
+                  На холсте показывается значение из Excel. Двойной клик редактирует fallback.
+                </span>
+              </>
+            ) : (
+              <TextField
+                label="Содержимое"
+                value={object.text ?? ''}
+                onChange={(text) => patch({ text })}
+              />
+            )}
+            <button
+              type="button"
+              className="btn-secondary inspector-btn"
+              onClick={() => setEditingTextId(object.id)}
+            >
+              Редактировать на холсте
+            </button>
+            <NumberField
+              label="Font Size"
+              value={object.style.fontSize ?? 16}
+              min={1}
+              onChange={(fontSize) => patchStyle('fontSize', fontSize)}
+            />
+            <ColorField
+              label="Color"
+              value={object.style.color ?? '#ffffff'}
+              onChange={(color) => patchStyle('color', color)}
+            />
+            <TextField
+              label="Font Family"
+              value={object.style.fontFamily ?? 'Inter, sans-serif'}
+              onChange={(fontFamily) => patchStyle('fontFamily', fontFamily)}
+            />
+            <NumberField
+              label="Font Weight"
+              value={Number(object.style.fontWeight ?? 400)}
+              min={100}
+              max={900}
+              step={100}
+              onChange={(fontWeight) => patchStyle('fontWeight', fontWeight)}
+            />
+            <NumberField
+              label="Line Height"
+              value={object.style.lineHeight ?? 1.2}
+              min={0.5}
+              max={5}
+              step={0.1}
+              onChange={(lineHeight) => patchStyle('lineHeight', lineHeight)}
+            />
+            <SelectField
+              label="Text Align"
+              value={object.style.textAlign ?? 'left'}
+              options={[
+                { value: 'left', label: 'left' },
+                { value: 'center', label: 'center' },
+                { value: 'right', label: 'right' },
+              ]}
+              onChange={(v) => patchStyle('textAlign', v)}
+            />
+          </Section>
+          <ExcelBindingInspector object={object} />
+        </>
       )}
 
       {isImage && <ImageInspector object={object} />}

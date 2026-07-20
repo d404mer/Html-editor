@@ -3,6 +3,7 @@ import Canvas from './canvas/Canvas'
 import Layers from './panels/Layers'
 import Inspector from './panels/Inspector'
 import Assets from './panels/Assets'
+import DataPanel from './panels/Data'
 import { useProjectStore } from './store/projectStore'
 import { useProjectInit, useProjectSync } from './hooks/useProjectSync'
 import './App.css'
@@ -44,9 +45,18 @@ export default function App() {
             >
               Ресурсы
             </button>
+            <button
+              type="button"
+              className={`sidebar-tab${leftPanelTab === 'data' ? ' active' : ''}`}
+              onClick={() => setLeftPanelTab('data')}
+            >
+              Данные
+            </button>
           </div>
           <div className="sidebar-content">
-            {leftPanelTab === 'layers' ? <Layers /> : <Assets />}
+            {leftPanelTab === 'layers' && <Layers />}
+            {leftPanelTab === 'assets' && <Assets />}
+            {leftPanelTab === 'data' && <DataPanel />}
           </div>
         </aside>
 

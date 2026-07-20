@@ -3,28 +3,42 @@ import { Group, Layer, Line, Rect, Stage, Text, Transformer } from 'react-konva'
 import type Konva from 'konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import ImageObjectNode from '../objects/ImageObject'
+import TextEditorOverlay, { useTextEditShortcuts } from './TextEditorOverlay'
 import { useProjectStore } from '../store/projectStore'
-import type { Asset, CanvasObject } from '../types/project'
+import { useExcelValues, getObjectDisplayText } from '../hooks/useExcelValues'
+import { canEditTextInline } from '../utils/text'
+import type { CanvasObject } from '../types/project'
 
 const GRID_SIZE = 20
 const ARTBOARD_PADDING = 80
 
 function TextObjectNode({
   object,
+  displayText,
   selected,
+  isEditing,
   onSelect,
   onDragEnd,
+  onStartEdit,
 }: {
   object: CanvasObject
+  displayText: string
   selected: boolean
+  isEditing: boolean
   onSelect: (id: string, additive?: boolean) => void
   onDragEnd: (id: string, x: number, y: number) => void
+  onStartEdit: (id: string) => void
 }) {
   if (!object.visible) return null
 
-  const handleClick = (e: KonvaEventObject<MouseEvent>) => {
+  const handleClick = (e: KonvaEventObject<Event>) => {
     e.cancelBubble = true
-    onSelect(object.id, e.evt.shiftKey)
+    onSelect(object.id, (e.evt as MouseEvent).shiftKey)
+  }
+
+  const handleDblClick = (e: KonvaEventObject<Event>) => {
+    e.cancelBubble = true
+    if (canEditTextInline(object)) onStartEdit(object.id)
   }
 
   return (
@@ -36,9 +50,11 @@ function TextObjectNode({
       height={object.height}
       rotation={object.rotation}
       opacity={object.style.opacity ?? 1}
-      draggable={!object.locked}
+      draggable={!object.locked && !isEditing}
       onClick={handleClick}
       onTap={handleClick}
+      onDblClick={handleDblClick}
+      onDblTap={handleDblClick}
       onDragEnd={(e) => onDragEnd(object.id, e.target.x(), e.target.y())}
     >
       {object.style.backgroundColor && (
@@ -51,11 +67,11 @@ function TextObjectNode({
           strokeWidth={object.style.borderWidth ?? 0}
         />
       )}
-      {object.text && (
+      {!isEditing && (displayText || object.textBinding || object.text) && (
         <Text
           width={object.width}
           height={object.height}
-          text={object.text}
+          text={displayText || ' '}
           fontSize={object.style.fontSize ?? 16}
           fontFamily={object.style.fontFamily ?? 'Inter, sans-serif'}
           fontStyle={
@@ -68,7 +84,18 @@ function TextObjectNode({
           verticalAlign="middle"
         />
       )}
-      {selected && (
+      {object.textBinding && !isEditing && (
+        <Rect
+          x={object.width - 20}
+          y={2}
+          width={18}
+          height={14}
+          fill="#22c55e"
+          cornerRadius={3}
+          listening={false}
+        />
+      )}
+      {selected && !isEditing && (
         <Rect
           width={object.width}
           height={object.height}
@@ -124,12 +151,17 @@ export default function Canvas() {
   const panY = useProjectStore((s) => s.panY)
   const showGrid = useProjectStore((s) => s.showGrid)
   const selectedObjectIds = useProjectStore((s) => s.selectedObjectIds)
+  const editingTextId = useProjectStore((s) => s.editingTextId)
   const setZoom = useProjectStore((s) => s.setZoom)
   const setPan = useProjectStore((s) => s.setPan)
   const selectObject = useProjectStore((s) => s.selectObject)
   const clearSelection = useProjectStore((s) => s.clearSelection)
   const updateObject = useProjectStore((s) => s.updateObject)
   const addImageObject = useProjectStore((s) => s.addImageObject)
+  const setEditingTextId = useProjectStore((s) => s.setEditingTextId)
+
+  const excelValues = useExcelValues()
+  useTextEditShortcuts()
 
   useEffect(() => {
     const container = containerRef.current
@@ -153,6 +185,7 @@ export default function Canvas() {
   }, [size.width, size.height, project.width, project.height, zoom, setPan])
 
   useEffect(() => {
+    if (editingTextId) return
     const transformer = transformerRef.current
     const stage = stageRef.current
     if (!transformer || !stage) return
@@ -169,7 +202,7 @@ export default function Canvas() {
     transformer.keepRatio(!!firstSelected?.lockAspectRatio)
     transformer.rotateEnabled(true)
     transformer.getLayer()?.batchDraw()
-  }, [selectedObjectIds, project.objects])
+  }, [selectedObjectIds, project.objects, editingTextId])
 
   const handleWheel = useCallback(
     (e: KonvaEventObject<WheelEvent>) => {
@@ -180,7 +213,10 @@ export default function Canvas() {
     [zoom, setZoom],
   )
 
-  const handleStageClick = () => clearSelection()
+  const handleStageClick = () => {
+    if (editingTextId) return
+    clearSelection()
+  }
 
   const handleDragEnd = (id: string, x: number, y: number) => {
     updateObject(id, { x: Math.round(x), y: Math.round(y) })
@@ -287,9 +323,12 @@ export default function Canvas() {
                 <TextObjectNode
                   key={obj.id}
                   object={obj}
+                  displayText={getObjectDisplayText(obj, excelValues)}
                   selected={selectedObjectIds.includes(obj.id)}
+                  isEditing={editingTextId === obj.id}
                   onSelect={selectObject}
                   onDragEnd={handleDragEnd}
+                  onStartEdit={setEditingTextId}
                 />
               )
             }
@@ -307,20 +346,24 @@ export default function Canvas() {
             return null
           })}
 
-          <Transformer
-            ref={transformerRef}
-            boundBoxFunc={(oldBox, newBox) => {
-              if (newBox.width < 20 || newBox.height < 20) return oldBox
-              return newBox
-            }}
-            anchorStroke="#6366f1"
-            anchorFill="#6366f1"
-            borderStroke="#6366f1"
-            rotateAnchorOffset={20}
-            onTransformEnd={handleTransformEnd}
-          />
+          {!editingTextId && (
+            <Transformer
+              ref={transformerRef}
+              boundBoxFunc={(oldBox, newBox) => {
+                if (newBox.width < 20 || newBox.height < 20) return oldBox
+                return newBox
+              }}
+              anchorStroke="#6366f1"
+              anchorFill="#6366f1"
+              borderStroke="#6366f1"
+              rotateAnchorOffset={20}
+              onTransformEnd={handleTransformEnd}
+            />
+          )}
         </Layer>
       </Stage>
+
+      <TextEditorOverlay containerRef={containerRef} />
 
       <div className="canvas-info">
         <span>
@@ -332,6 +375,9 @@ export default function Canvas() {
             {Math.round(selectedObject.x)}, {Math.round(selectedObject.y)} ·{' '}
             {Math.round(selectedObject.width)} × {Math.round(selectedObject.height)}
           </span>
+        )}
+        {selectedObject?.type === 'text' && !editingTextId && (
+          <span className="canvas-hint">Двойной клик / F2 — редактировать</span>
         )}
       </div>
     </div>

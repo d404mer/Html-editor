@@ -44,6 +44,7 @@ export async function saveProject(project) {
   await fs.mkdir(path.join(dir, 'assets', 'images'), { recursive: true })
   await fs.mkdir(path.join(dir, 'assets', 'videos'), { recursive: true })
   await fs.mkdir(path.join(dir, 'assets', 'svg'), { recursive: true })
+  await fs.mkdir(path.join(dir, 'data'), { recursive: true })
 
   const projectPath = path.join(dir, 'project.json')
   const tmpPath = `${projectPath}.tmp`
@@ -51,10 +52,85 @@ export async function saveProject(project) {
   await fs.rename(tmpPath, projectPath)
 }
 
-export async function writeProjectFiles(projectId, html, css) {
+export function getDataDir(projectId) {
+  return path.join(getProjectDir(projectId), 'data')
+}
+
+/** Сканирует папку data/ и синхронизирует список Excel-файлов в project.dataFiles */
+export async function syncDataFilesFromDisk(project) {
+  const dataDir = getDataDir(project.id)
+  await fs.mkdir(dataDir, { recursive: true })
+
+  let entries = []
+  try {
+    entries = await fs.readdir(dataDir, { withFileTypes: true })
+  } catch {
+    entries = []
+  }
+
+  const existing = new Map((project.dataFiles ?? []).map((f) => [f.path, f]))
+  const dataFiles = []
+
+  for (const entry of entries) {
+    if (!entry.isFile()) continue
+    const lower = entry.name.toLowerCase()
+    if (!lower.endsWith('.xlsx') && !lower.endsWith('.xls') && !lower.endsWith('.csv')) {
+      continue
+    }
+
+    const relPath = `data/${entry.name}`
+    const prev = existing.get(relPath)
+    if (prev) {
+      dataFiles.push(prev)
+    } else {
+      dataFiles.push({
+        id: crypto.randomUUID().slice(0, 8),
+        name: entry.name,
+        path: relPath,
+      })
+    }
+  }
+
+  project.dataFiles = dataFiles
+  return project
+}
+
+export async function saveDataFile(projectId, filename, buffer) {
+  const dataDir = getDataDir(projectId)
+  await fs.mkdir(dataDir, { recursive: true })
+  const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_')
+  const fullPath = path.join(dataDir, safeName)
+  await fs.writeFile(fullPath, buffer)
+  return { name: safeName, path: `data/${safeName}` }
+}
+
+export async function deleteDataFile(projectId, relPath) {
+  const fullPath = path.join(getProjectDir(projectId), relPath)
+  try {
+    await fs.unlink(fullPath)
+  } catch {
+    // already removed
+  }
+}
+
+export function getDataFilePath(projectId, dataFile) {
+  return path.join(getProjectDir(projectId), dataFile.path)
+}
+
+export async function writeProjectFiles(projectId, html, css, extras = {}) {
   const dir = getProjectDir(projectId)
   await fs.writeFile(path.join(dir, 'index.html'), html, 'utf-8')
   await fs.writeFile(path.join(dir, 'styles.css'), css, 'utf-8')
+  if (extras.dataCache != null) {
+    await fs.writeFile(
+      path.join(dir, 'data-cache.json'),
+      JSON.stringify(extras.dataCache, null, 2),
+      'utf-8',
+    )
+  }
+  if (extras.excelBindScript) {
+    await fs.writeFile(path.join(dir, 'excel-bind.js'), extras.excelBindScript, 'utf-8')
+  }
 }
 
 export function getAssetSubdir(type) {
@@ -94,6 +170,7 @@ export async function createDefaultProject(projectId, name = 'Untitled Project')
     width: 1920,
     height: 1080,
     assets: [],
+    dataFiles: [],
     objects: [],
   }
   await saveProject(project)

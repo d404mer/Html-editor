@@ -2,6 +2,29 @@ export type ObjectType = 'text' | 'image' | 'video' | 'svg' | 'gif'
 
 export type AssetType = 'image' | 'video' | 'svg' | 'gif'
 
+export type TextBindingMode = 'cell' | 'column'
+
+/** Привязка текстового объекта к полю Excel */
+export interface TextBinding {
+  fileId: string
+  sheet: string
+  mode: TextBindingMode
+  /** Ячейка, например B2 (mode: cell) */
+  cell?: string
+  /** Заголовок столбца (mode: column) */
+  column?: string
+  /** Номер строки в листе, 1-based (строка 1 — заголовки) */
+  row?: number
+  /** Текст, если Excel недоступен или ячейка пуста */
+  fallback?: string
+}
+
+export interface DataFile {
+  id: string
+  name: string
+  path: string
+}
+
 export type ObjectFit = 'fill' | 'contain' | 'cover' | 'none' | 'scale-down'
 
 export interface CropRect {
@@ -57,6 +80,8 @@ export interface CanvasObject {
   text?: string
   assetId?: string
   customCss?: string
+  /** Привязка к Excel — текст берётся из файла data/ */
+  textBinding?: TextBinding
 }
 
 export interface Asset {
@@ -74,9 +99,10 @@ export interface Project {
   height: number
   objects: CanvasObject[]
   assets: Asset[]
+  dataFiles?: DataFile[]
 }
 
-export type LeftPanelTab = 'layers' | 'assets'
+export type LeftPanelTab = 'layers' | 'assets' | 'data'
 
 export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error'
 
@@ -88,6 +114,8 @@ export interface EditorState {
   showGrid: boolean
   leftPanelTab: LeftPanelTab
   syncStatus: SyncStatus
+  /** ID текстового объекта в режиме inline-редактирования */
+  editingTextId: string | null
 }
 
 export const DEFAULT_IMAGE_FILTERS: ImageFilters = {

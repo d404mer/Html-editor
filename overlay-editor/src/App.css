@@ -458,3 +458,235 @@
   border: none;
   border-radius: 3px;
 }
+
+/* Data panel */
+.data-panel {
+  padding: 8px;
+}
+
+.data-toolbar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.data-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0 0 8px;
+}
+
+.inline-code {
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  background: var(--surface);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.data-dropzone {
+  min-height: 80px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.data-dropzone.drag-over {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.data-empty {
+  display: block;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 16px;
+}
+
+.data-file-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.data-file-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--surface);
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.data-file-icon {
+  flex-shrink: 0;
+}
+
+.data-file-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.data-file-name {
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.data-file-path {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-family: ui-monospace, monospace;
+}
+
+.field-select {
+  cursor: pointer;
+}
+
+.field-textarea {
+  width: 100%;
+  padding: 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  resize: vertical;
+  outline: none;
+}
+
+.field-textarea:focus {
+  border-color: var(--accent);
+}
+
+.field-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.field-toggle {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.inspector-btn {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.sync-status {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.sync-syncing {
+  color: var(--text-muted);
+}
+
+.sync-synced {
+  color: #22c55e;
+}
+
+.sync-error {
+  color: #ef4444;
+}
+
+.loading-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  color: var(--text-secondary);
+}
+
+.canvas-text-editor {
+  margin: 0;
+  padding: 2px 4px;
+  border: 2px solid var(--accent);
+  border-radius: 2px;
+  background: rgba(15, 15, 20, 0.92);
+  resize: none;
+  outline: none;
+  overflow: hidden;
+  z-index: 1000;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+.canvas-hint {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.excel-preview-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.excel-preview-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.excel-preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+}
+
+.excel-preview-table th,
+.excel-preview-table td {
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.excel-preview-table th {
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.excel-preview-table td {
+  color: var(--text-primary);
+}
+
+.excel-preview-table th:hover,
+.excel-preview-table td:hover {
+  background: var(--hover-bg);
+}
+
+.excel-cell-active {
+  background: var(--accent-bg) !important;
+  outline: 1px solid var(--accent);
+}
+
+.excel-row-num {
+  color: var(--text-muted);
+  background: var(--input-bg);
+  cursor: default;
+  min-width: 24px;
+  text-align: center;
+}

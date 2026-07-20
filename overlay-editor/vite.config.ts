@@ -9,6 +9,10 @@ export default defineConfig({
       '/api': 'http://localhost:3000',
       '/preview': 'http://localhost:3000',
       '/live-reload.js': 'http://localhost:3000',
+      '/live': {
+        target: 'ws://localhost:3000',
+        ws: true,
+      },
     },
   },
 })

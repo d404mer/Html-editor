@@ -6,6 +6,7 @@ import type {
   ObjectStyle,
   Project,
   SyncStatus,
+  TextBinding,
 } from '../types/project'
 import { DEFAULT_CROP, DEFAULT_IMAGE_FILTERS } from '../types/project'
 
@@ -40,7 +41,11 @@ interface ProjectStore extends EditorState {
   renameAsset: (assetId: string, name: string) => void
   replaceAsset: (assetId: string, asset: Asset) => void
   addImageObject: (asset: Asset, position?: { x: number; y: number }) => string
+  addTextObject: (position?: { x: number; y: number }) => string
   replaceObjectAsset: (objectId: string, asset: Asset) => void
+  setTextBinding: (objectId: string, binding: TextBinding | undefined) => void
+  updateTextContent: (objectId: string, content: string) => void
+  setEditingTextId: (id: string | null) => void
   deleteSelectedObjects: () => void
   getAssetUrl: (asset: Asset) => string
 }
@@ -51,6 +56,7 @@ const EMPTY_PROJECT: Project = {
   width: 1920,
   height: 1080,
   assets: [],
+  dataFiles: [],
   objects: [],
 }
 
@@ -64,6 +70,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   showGrid: true,
   leftPanelTab: 'layers',
   syncStatus: 'idle',
+  editingTextId: null,
 
   setProject: (project) => set({ project }),
   setProjectLoaded: (projectLoaded) => set({ projectLoaded }),
@@ -90,7 +97,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       return { selectedObjectIds: [id] }
     }),
 
-  clearSelection: () => set({ selectedObjectIds: [] }),
+  clearSelection: () => set({ selectedObjectIds: [], editingTextId: null }),
 
   updateObject: (id, patch) =>
     set((s) => ({
@@ -220,6 +227,58 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
     return id
   },
+
+  addTextObject: (position) => {
+    const { project } = get()
+    const id = createId('txt')
+    const obj: CanvasObject = {
+      id,
+      type: 'text',
+      name: 'Text',
+      x: position?.x ?? 200,
+      y: position?.y ?? 200,
+      width: 400,
+      height: 60,
+      rotation: 0,
+      zIndex: nextZIndex(project.objects),
+      visible: true,
+      locked: false,
+      text: 'Текст',
+      style: {
+        fontSize: 32,
+        fontFamily: 'Inter, sans-serif',
+        fontWeight: 600,
+        color: '#ffffff',
+        textAlign: 'left',
+        opacity: 1,
+      },
+    }
+
+    set((s) => ({
+      project: { ...s.project, objects: [...s.project.objects, obj] },
+      selectedObjectIds: [id],
+    }))
+
+    return id
+  },
+
+  setTextBinding: (objectId, textBinding) => {
+    get().updateObject(objectId, { textBinding })
+  },
+
+  updateTextContent: (objectId, content) => {
+    const obj = get().project.objects.find((o) => o.id === objectId)
+    if (!obj || obj.type !== 'text') return
+    if (obj.textBinding) {
+      get().updateObject(objectId, {
+        textBinding: { ...obj.textBinding, fallback: content },
+      })
+    } else {
+      get().updateObject(objectId, { text: content })
+    }
+  },
+
+  setEditingTextId: (editingTextId) => set({ editingTextId }),
 
   replaceObjectAsset: (objectId, asset) => {
     const isGif = asset.type === 'gif'

@@ -32,9 +32,9 @@ export default function ImageObjectNode({
   const hasCrop =
     crop.x !== 0 || crop.y !== 0 || crop.width !== 1 || crop.height !== 1
 
-  const handleClick = (e: KonvaEventObject<MouseEvent>) => {
+  const handleClick = (e: KonvaEventObject<Event>) => {
     e.cancelBubble = true
-    onSelect(object.id, e.evt.shiftKey)
+    onSelect(object.id, (e.evt as MouseEvent).shiftKey)
   }
 
   const imgNaturalW = image?.naturalWidth ?? object.width

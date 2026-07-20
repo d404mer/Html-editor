@@ -15,6 +15,7 @@ export default function Toolbar() {
   const setZoom = useProjectStore((s) => s.setZoom)
   const toggleGrid = useProjectStore((s) => s.toggleGrid)
   const setLeftPanelTab = useProjectStore((s) => s.setLeftPanelTab)
+  const addTextObject = useProjectStore((s) => s.addTextObject)
 
   const openPreview = () => {
     if (project.id) {
@@ -39,7 +40,12 @@ export default function Toolbar() {
       </div>
 
       <div className="toolbar-center">
-        <button type="button" className="tool-btn" title="Текст">
+        <button
+          type="button"
+          className="tool-btn"
+          title="Добавить текст"
+          onClick={() => addTextObject()}
+        >
           T
         </button>
         <button

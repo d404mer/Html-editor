@@ -6,6 +6,14 @@ function escapeHtml(text) {
     .replace(/"/g, '&quot;')
 }
 
+function getDisplayTextForObject(obj, resolvedValues) {
+  if (obj.type !== 'text') return obj.text ?? ''
+  if (obj.textBinding) {
+    return resolvedValues[obj.id] ?? obj.textBinding.fallback ?? obj.text ?? ''
+  }
+  return obj.text ?? ''
+}
+
 function buildFilterCss(filters) {
   if (!filters) return undefined
   const parts = []
@@ -128,7 +136,7 @@ function cropInnerCss(object) {
   return lines.join('\n')
 }
 
-export function generateHtml(project) {
+export function generateHtml(project, resolvedValues = {}) {
   const sorted = [...project.objects].sort((a, b) => a.zIndex - b.zIndex)
   const elements = []
 
@@ -136,7 +144,13 @@ export function generateHtml(project) {
     if (!obj.visible) continue
 
     if (obj.type === 'text') {
-      elements.push(`    <div class="el-${obj.id}">${escapeHtml(obj.text ?? '')}</div>`)
+      const displayText = getDisplayTextForObject(obj, resolvedValues)
+      const bindAttr = obj.textBinding
+        ? ` data-excel-bind="${obj.id}"`
+        : ''
+      elements.push(
+        `    <div class="el-${obj.id}"${bindAttr}>${escapeHtml(displayText)}</div>`,
+      )
       continue
     }
 
@@ -168,6 +182,7 @@ export function generateHtml(project) {
   <title>${escapeHtml(project.name)}</title>
   <link rel="stylesheet" href="styles.css" />
   <script src="/live-reload.js"></script>
+  <script src="excel-bind.js"></script>
 </head>
 <body>
   <div id="overlay">
@@ -218,9 +233,30 @@ export function generateCss(project) {
   return `${rules.join('\n\n')}\n`
 }
 
-export function exportProject(project) {
+export function exportProject(project, resolvedValues = {}) {
   return {
-    html: generateHtml(project),
+    html: generateHtml(project, resolvedValues),
     css: generateCss(project),
+    dataCache: resolvedValues,
   }
 }
+
+export const EXCEL_BIND_SCRIPT = `(function () {
+  var POLL_MS = 2000;
+  function applyValues(values) {
+    if (!values) return;
+    Object.keys(values).forEach(function (id) {
+      var nodes = document.querySelectorAll('[data-excel-bind="' + id + '"]');
+      nodes.forEach(function (el) { el.textContent = values[id]; });
+    });
+  }
+  function loadCache() {
+    fetch('data-cache.json?t=' + Date.now())
+      .then(function (r) { return r.json(); })
+      .then(applyValues)
+      .catch(function () {});
+  }
+  loadCache();
+  setInterval(loadCache, POLL_MS);
+})();
+`
