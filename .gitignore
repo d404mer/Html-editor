@@ -1,0 +1,9 @@
+node_modules/
+dist/
+projects/
+*.log
+.env
+.DS_Store
+Thumbs.db
+packages/client/.vite/
+packages/server/.thumbs/
