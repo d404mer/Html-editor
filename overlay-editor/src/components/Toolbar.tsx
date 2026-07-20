@@ -1,11 +1,26 @@
 import { useProjectStore } from '../store/projectStore'
 
+const SYNC_LABELS = {
+  idle: '',
+  syncing: 'Сохранение…',
+  synced: 'Сохранено',
+  error: 'Ошибка синхронизации',
+} as const
+
 export default function Toolbar() {
   const project = useProjectStore((s) => s.project)
   const zoom = useProjectStore((s) => s.zoom)
   const showGrid = useProjectStore((s) => s.showGrid)
+  const syncStatus = useProjectStore((s) => s.syncStatus)
   const setZoom = useProjectStore((s) => s.setZoom)
   const toggleGrid = useProjectStore((s) => s.toggleGrid)
+  const setLeftPanelTab = useProjectStore((s) => s.setLeftPanelTab)
+
+  const openPreview = () => {
+    if (project.id) {
+      window.open(`/preview/${project.id}/`, '_blank')
+    }
+  }
 
   return (
     <header className="toolbar">
@@ -16,19 +31,29 @@ export default function Toolbar() {
         </div>
         <div className="toolbar-divider" />
         <span className="project-name">{project.name}</span>
+        {syncStatus !== 'idle' && (
+          <span className={`sync-status sync-${syncStatus}`}>
+            {SYNC_LABELS[syncStatus]}
+          </span>
+        )}
       </div>
 
       <div className="toolbar-center">
         <button type="button" className="tool-btn" title="Текст">
           T
         </button>
-        <button type="button" className="tool-btn" title="Изображение">
+        <button
+          type="button"
+          className="tool-btn"
+          title="Изображение — загрузите в панели Ресурсы и перетащите на холст"
+          onClick={() => setLeftPanelTab('assets')}
+        >
           ▣
         </button>
-        <button type="button" className="tool-btn" title="Видео">
+        <button type="button" className="tool-btn" title="Видео" disabled>
           ▶
         </button>
-        <button type="button" className="tool-btn" title="SVG">
+        <button type="button" className="tool-btn" title="SVG" disabled>
           ◇
         </button>
       </div>
@@ -70,11 +95,8 @@ export default function Toolbar() {
           </button>
         </div>
         <div className="toolbar-divider" />
-        <button type="button" className="btn-primary" disabled>
-          Сохранить
-        </button>
-        <button type="button" className="btn-secondary" disabled>
-          Экспорт
+        <button type="button" className="btn-secondary" onClick={openPreview}>
+          Live Preview
         </button>
       </div>
     </header>

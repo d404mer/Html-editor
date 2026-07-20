@@ -4,11 +4,24 @@ import Layers from './panels/Layers'
 import Inspector from './panels/Inspector'
 import Assets from './panels/Assets'
 import { useProjectStore } from './store/projectStore'
+import { useProjectInit, useProjectSync } from './hooks/useProjectSync'
 import './App.css'
 
 export default function App() {
   const leftPanelTab = useProjectStore((s) => s.leftPanelTab)
   const setLeftPanelTab = useProjectStore((s) => s.setLeftPanelTab)
+  const projectLoaded = useProjectStore((s) => s.projectLoaded)
+
+  useProjectInit()
+  useProjectSync()
+
+  if (!projectLoaded) {
+    return (
+      <div className="editor loading-screen">
+        <p>Загрузка проекта…</p>
+      </div>
+    )
+  }
 
   return (
     <div className="editor">

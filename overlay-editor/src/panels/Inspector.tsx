@@ -1,14 +1,21 @@
 import { useProjectStore } from '../store/projectStore'
-import type { CanvasObject } from '../types/project'
+import type { CanvasObject, ObjectFit } from '../types/project'
+import { DEFAULT_CROP, DEFAULT_IMAGE_FILTERS } from '../types/project'
 
 function NumberField({
   label,
   value,
   onChange,
+  min,
+  max,
+  step = 1,
 }: {
   label: string
   value: number
   onChange: (v: number) => void
+  min?: number
+  max?: number
+  step?: number
 }) {
   return (
     <label className="field">
@@ -16,7 +23,10 @@ function NumberField({
       <input
         type="number"
         className="field-input"
-        value={Math.round(value)}
+        value={Math.round(value * 100) / 100}
+        min={min}
+        max={max}
+        step={step}
         onChange={(e) => onChange(Number(e.target.value))}
       />
     </label>
@@ -27,10 +37,12 @@ function TextField({
   label,
   value,
   onChange,
+  readOnly,
 }: {
   label: string
   value: string
-  onChange: (v: string) => void
+  onChange?: (v: string) => void
+  readOnly?: boolean
 }) {
   return (
     <label className="field">
@@ -39,7 +51,8 @@ function TextField({
         type="text"
         className="field-input"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        readOnly={readOnly}
+        onChange={onChange ? (e) => onChange(e.target.value) : undefined}
       />
     </label>
   )
@@ -75,6 +88,56 @@ function ColorField({
   )
 }
 
+function SelectField({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  value: string
+  options: { value: string; label: string }[]
+  onChange: (v: string) => void
+}) {
+  return (
+    <label className="field">
+      <span className="field-label">{label}</span>
+      <select
+        className="field-input field-select"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+function ToggleField({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string
+  checked: boolean
+  onChange: (v: boolean) => void
+}) {
+  return (
+    <label className="field field-toggle">
+      <span className="field-label">{label}</span>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+    </label>
+  )
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="inspector-section">
@@ -84,12 +147,192 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
-function ObjectInspector({ object }: { object: CanvasObject }) {
+function ImageInspector({ object }: { object: CanvasObject }) {
+  const project = useProjectStore((s) => s.project)
   const updateObject = useProjectStore((s) => s.updateObject)
+  const updateObjectStyle = useProjectStore((s) => s.updateObjectStyle)
+  const replaceObjectAsset = useProjectStore((s) => s.replaceObjectAsset)
+  const setProject = useProjectStore((s) => s.setProject)
+
+  const filters = { ...DEFAULT_IMAGE_FILTERS, ...object.style.filters }
+  const crop = { ...DEFAULT_CROP, ...object.style.crop }
 
   const patch = (data: Partial<CanvasObject>) => updateObject(object.id, data)
-  const patchStyle = (key: string, value: string | number) =>
-    updateObject(object.id, { style: { ...object.style, [key]: value } })
+  const patchStyle = (key: string, value: unknown) =>
+    updateObjectStyle(object.id, { [key]: value })
+
+  const patchFilter = (key: keyof typeof DEFAULT_IMAGE_FILTERS, value: number) =>
+    updateObjectStyle(object.id, {
+      filters: { ...filters, [key]: value },
+    })
+
+  const patchCrop = (key: keyof typeof DEFAULT_CROP, value: number) =>
+    updateObjectStyle(object.id, {
+      crop: { ...crop, [key]: value },
+    })
+
+  const handleReplaceAsset = async (assetId: string) => {
+    const asset = project.assets.find((a) => a.id === assetId)
+    if (asset) replaceObjectAsset(object.id, asset)
+  }
+
+  const handleUploadReplace = async (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(
+      `/api/projects/${project.id}/assets/${object.assetId}/replace`,
+      { method: 'POST', body: form },
+    )
+    if (res.ok) setProject(await res.json())
+  }
+
+  return (
+    <>
+      <Section title="Изображение">
+        <SelectField
+          label="Ресурс"
+          value={object.assetId ?? ''}
+          options={[
+            { value: '', label: '— не выбран —' },
+            ...project.assets
+              .filter((a) => a.type === 'image' || a.type === 'gif')
+              .map((a) => ({ value: a.id, label: a.name })),
+          ]}
+          onChange={handleReplaceAsset}
+        />
+        <button
+          type="button"
+          className="btn-secondary inspector-btn"
+          onClick={() => {
+            const input = document.createElement('input')
+            input.type = 'file'
+            input.accept = 'image/*'
+            input.onchange = () => {
+              const file = input.files?.[0]
+              if (file && object.assetId) handleUploadReplace(file)
+            }
+            input.click()
+          }}
+        >
+          Заменить файл
+        </button>
+        <ToggleField
+          label="Сохранять пропорции"
+          checked={object.lockAspectRatio ?? true}
+          onChange={(lockAspectRatio) => patch({ lockAspectRatio })}
+        />
+        <SelectField
+          label="Object Fit"
+          value={object.style.objectFit ?? 'cover'}
+          options={[
+            { value: 'fill', label: 'fill' },
+            { value: 'contain', label: 'contain' },
+            { value: 'cover', label: 'cover' },
+            { value: 'none', label: 'none' },
+            { value: 'scale-down', label: 'scale-down' },
+          ]}
+          onChange={(v) => patchStyle('objectFit', v as ObjectFit)}
+        />
+        <TextField
+          label="Object Position"
+          value={object.style.objectPosition ?? 'center'}
+          onChange={(v) => patchStyle('objectPosition', v)}
+        />
+      </Section>
+
+      <Section title="Обрезка (Crop)">
+        <div className="field-row">
+          <NumberField
+            label="X %"
+            value={crop.x * 100}
+            min={0}
+            max={100}
+            onChange={(v) => patchCrop('x', v / 100)}
+          />
+          <NumberField
+            label="Y %"
+            value={crop.y * 100}
+            min={0}
+            max={100}
+            onChange={(v) => patchCrop('y', v / 100)}
+          />
+        </div>
+        <div className="field-row">
+          <NumberField
+            label="W %"
+            value={crop.width * 100}
+            min={1}
+            max={100}
+            onChange={(v) => patchCrop('width', v / 100)}
+          />
+          <NumberField
+            label="H %"
+            value={crop.height * 100}
+            min={1}
+            max={100}
+            onChange={(v) => patchCrop('height', v / 100)}
+          />
+        </div>
+        <button
+          type="button"
+          className="btn-secondary inspector-btn"
+          onClick={() => patchStyle('crop', { ...DEFAULT_CROP })}
+        >
+          Сбросить crop
+        </button>
+      </Section>
+
+      <Section title="Flip">
+        <div className="field-row">
+          <ToggleField
+            label="Flip X"
+            checked={!!object.style.flipX}
+            onChange={(flipX) => patchStyle('flipX', flipX)}
+          />
+          <ToggleField
+            label="Flip Y"
+            checked={!!object.style.flipY}
+            onChange={(flipY) => patchStyle('flipY', flipY)}
+          />
+        </div>
+      </Section>
+
+      <Section title="Фильтры">
+        <NumberField
+          label="Brightness %"
+          value={filters.brightness}
+          min={0}
+          max={300}
+          onChange={(v) => patchFilter('brightness', v)}
+        />
+        <NumberField
+          label="Contrast %"
+          value={filters.contrast}
+          min={0}
+          max={300}
+          onChange={(v) => patchFilter('contrast', v)}
+        />
+        <NumberField
+          label="Blur px"
+          value={filters.blur}
+          min={0}
+          max={50}
+          onChange={(v) => patchFilter('blur', v)}
+        />
+      </Section>
+    </>
+  )
+}
+
+function ObjectInspector({ object }: { object: CanvasObject }) {
+  const updateObject = useProjectStore((s) => s.updateObject)
+  const updateObjectStyle = useProjectStore((s) => s.updateObjectStyle)
+
+  const patch = (data: Partial<CanvasObject>) => updateObject(object.id, data)
+  const patchStyle = (key: string, value: string | number | boolean) =>
+    updateObjectStyle(object.id, { [key]: value })
+
+  const isImage = object.type === 'image' || object.type === 'gif'
 
   return (
     <>
@@ -99,26 +342,25 @@ function ObjectInspector({ object }: { object: CanvasObject }) {
           value={object.name}
           onChange={(name) => patch({ name })}
         />
-        <label className="field">
-          <span className="field-label">Тип</span>
-          <input type="text" className="field-input" value={object.type} readOnly />
-        </label>
+        <TextField label="Тип" value={object.type} readOnly />
       </Section>
 
       <Section title="Позиция">
         <div className="field-row">
-          <NumberField label="X" value={object.x} onChange={(x) => patch({ x })} />
-          <NumberField label="Y" value={object.y} onChange={(y) => patch({ y })} />
+          <NumberField label="Left" value={object.x} onChange={(x) => patch({ x })} />
+          <NumberField label="Top" value={object.y} onChange={(y) => patch({ y })} />
         </div>
         <div className="field-row">
           <NumberField
-            label="W"
+            label="Width"
             value={object.width}
+            min={1}
             onChange={(width) => patch({ width })}
           />
           <NumberField
-            label="H"
+            label="Height"
             value={object.height}
+            min={1}
             onChange={(height) => patch({ height })}
           />
         </div>
@@ -129,11 +371,18 @@ function ObjectInspector({ object }: { object: CanvasObject }) {
         />
       </Section>
 
-      <Section title="Трансформация">
+      <Section title="Transform">
         <NumberField
-          label="Rotation"
+          label="Rotation °"
           value={object.rotation}
           onChange={(rotation) => patch({ rotation })}
+        />
+        <NumberField
+          label="Opacity %"
+          value={(object.style.opacity ?? 1) * 100}
+          min={0}
+          max={100}
+          onChange={(v) => patchStyle('opacity', v / 100)}
         />
       </Section>
 
@@ -145,41 +394,93 @@ function ObjectInspector({ object }: { object: CanvasObject }) {
             onChange={(text) => patch({ text })}
           />
           <NumberField
-            label="Размер"
+            label="Font Size"
             value={object.style.fontSize ?? 16}
+            min={1}
             onChange={(fontSize) => patchStyle('fontSize', fontSize)}
           />
           <ColorField
-            label="Цвет"
+            label="Color"
             value={object.style.color ?? '#ffffff'}
             onChange={(color) => patchStyle('color', color)}
           />
           <TextField
-            label="Шрифт"
+            label="Font Family"
             value={object.style.fontFamily ?? 'Inter, sans-serif'}
             onChange={(fontFamily) => patchStyle('fontFamily', fontFamily)}
+          />
+          <NumberField
+            label="Font Weight"
+            value={Number(object.style.fontWeight ?? 400)}
+            min={100}
+            max={900}
+            step={100}
+            onChange={(fontWeight) => patchStyle('fontWeight', fontWeight)}
+          />
+          <NumberField
+            label="Line Height"
+            value={object.style.lineHeight ?? 1.2}
+            min={0.5}
+            max={5}
+            step={0.1}
+            onChange={(lineHeight) => patchStyle('lineHeight', lineHeight)}
+          />
+          <SelectField
+            label="Text Align"
+            value={object.style.textAlign ?? 'left'}
+            options={[
+              { value: 'left', label: 'left' },
+              { value: 'center', label: 'center' },
+              { value: 'right', label: 'right' },
+            ]}
+            onChange={(v) => patchStyle('textAlign', v)}
           />
         </Section>
       )}
 
-      <Section title="Внешний вид">
-        <NumberField
-          label="Opacity"
-          value={(object.style.opacity ?? 1) * 100}
-          onChange={(v) => patchStyle('opacity', v / 100)}
+      {isImage && <ImageInspector object={object} />}
+
+      <Section title="Background & Border">
+        <ColorField
+          label="Background"
+          value={object.style.backgroundColor ?? '#00000000'}
+          onChange={(backgroundColor) => patchStyle('backgroundColor', backgroundColor)}
         />
-        {object.style.backgroundColor !== undefined && (
-          <ColorField
-            label="Фон"
-            value={object.style.backgroundColor}
-            onChange={(backgroundColor) => patchStyle('backgroundColor', backgroundColor)}
-          />
-        )}
         <NumberField
-          label="Radius"
+          label="Border Radius"
           value={object.style.borderRadius ?? 0}
+          min={0}
           onChange={(borderRadius) => patchStyle('borderRadius', borderRadius)}
         />
+        <NumberField
+          label="Border Width"
+          value={object.style.borderWidth ?? 0}
+          min={0}
+          onChange={(borderWidth) => patchStyle('borderWidth', borderWidth)}
+        />
+        <ColorField
+          label="Border Color"
+          value={object.style.borderColor ?? '#ffffff'}
+          onChange={(borderColor) => patchStyle('borderColor', borderColor)}
+        />
+        <TextField
+          label="Box Shadow"
+          value={object.style.boxShadow ?? ''}
+          onChange={(boxShadow) => patchStyle('boxShadow', boxShadow)}
+        />
+      </Section>
+
+      <Section title="Custom CSS">
+        <textarea
+          className="field-textarea css-editor"
+          placeholder="opacity: 0.9;&#10;mix-blend-mode: screen;"
+          value={object.customCss ?? ''}
+          onChange={(e) => patch({ customCss: e.target.value })}
+          rows={6}
+        />
+        <span className="field-hint">
+          Свойства добавляются к сгенерированным CSS правилам элемента
+        </span>
       </Section>
     </>
   )
@@ -203,5 +504,9 @@ export default function Inspector() {
     )
   }
 
-  return <div className="inspector-content"><ObjectInspector object={selected} /></div>
+  return (
+    <div className="inspector-content">
+      <ObjectInspector object={selected} />
+    </div>
+  )
 }
