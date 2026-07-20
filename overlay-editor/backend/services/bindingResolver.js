@@ -38,6 +38,8 @@ function resolveObjectBinding(project, obj, binding) {
         raw,
         value,
       })
+      console.log('resolveImageDisplayPath: raw:', raw);
+      console.log('resolveImageDisplayPath: value:', value);
       return value
     }
     const value = raw || binding.fallback || obj.text || ''
@@ -113,3 +115,4 @@ export function getDisplayImagePath(project, objectId, resolvedValues) {
     asset?.path,
   )
 }
+
