@@ -4,49 +4,82 @@ import {
 import {
   resolveBindingFromFile,
 } from '../services/excelService.js'
+import {
+  resolveImageDisplayPath,
+} from '../utils/bindingPath.js'
 import { excelDebug } from '../utils/excelDebug.js'
 
 /**
  * @param {object} project
- * @returns {Record<string, string>} objectId -> resolved text
+ * @param {object} obj
+ * @param {import('../types').ExcelBinding} binding
+ */
+function resolveObjectBinding(project, obj, binding) {
+  const dataFile = (project.dataFiles ?? []).find((f) => f.id === binding.fileId)
+  if (!dataFile) {
+    excelDebug('resolve: data file not found', {
+      objectId: obj.id,
+      fileId: binding.fileId,
+      knownFiles: (project.dataFiles ?? []).map((f) => ({ id: f.id, name: f.name })),
+    })
+    return binding.fallback ?? (obj.type === 'text' ? obj.text ?? '' : '')
+  }
+
+  try {
+    const filePath = getDataFilePath(project.id, dataFile)
+    const raw = resolveBindingFromFile(filePath, binding)
+    if (obj.type === 'image' || obj.type === 'gif') {
+      const asset = project.assets.find((a) => a.id === obj.assetId)
+      const value = resolveImageDisplayPath(raw, binding, asset?.path)
+      excelDebug('resolve image: ok', {
+        objectId: obj.id,
+        file: dataFile.name,
+        binding,
+        raw,
+        value,
+      })
+      return value
+    }
+    const value = raw || binding.fallback || obj.text || ''
+    excelDebug('resolve text: ok', {
+      objectId: obj.id,
+      file: dataFile.name,
+      binding,
+      value,
+    })
+    return value
+  } catch (err) {
+    excelDebug('resolve: read error', {
+      objectId: obj.id,
+      file: dataFile?.name,
+      error: err.message,
+    })
+    if (obj.type === 'image' || obj.type === 'gif') {
+      const asset = project.assets.find((a) => a.id === obj.assetId)
+      return resolveImageDisplayPath('', binding, asset?.path)
+    }
+    return binding.fallback ?? obj.text ?? ''
+  }
+}
+
+/**
+ * @param {object} project
+ * @returns {Record<string, string>} objectId -> resolved text or image path
  */
 export function resolveProjectBindings(project) {
   /** @type {Record<string, string>} */
   const values = {}
 
   for (const obj of project.objects ?? []) {
-    if (obj.type !== 'text' || !obj.textBinding) continue
+    const binding =
+      obj.type === 'text'
+        ? obj.textBinding
+        : obj.type === 'image' || obj.type === 'gif'
+          ? obj.imageBinding
+          : undefined
+    if (!binding) continue
 
-    const binding = obj.textBinding
-    const dataFile = (project.dataFiles ?? []).find((f) => f.id === binding.fileId)
-    if (!dataFile) {
-      excelDebug('resolve: data file not found', {
-        objectId: obj.id,
-        fileId: binding.fileId,
-        knownFiles: (project.dataFiles ?? []).map((f) => ({ id: f.id, name: f.name })),
-      })
-      values[obj.id] = binding.fallback ?? obj.text ?? ''
-      continue
-    }
-
-    try {
-      const filePath = getDataFilePath(project.id, dataFile)
-      const value = resolveBindingFromFile(filePath, binding)
-      excelDebug('resolve: ok', {
-        objectId: obj.id,
-        file: dataFile.name,
-        binding,
-        value,
-      })
-      values[obj.id] = value
-    } catch (err) {
-      excelDebug('resolve: read error', {
-        objectId: obj.id,
-        file: dataFile.name,
-        error: err.message,
-      })
-      values[obj.id] = binding.fallback ?? obj.text ?? ''
-    }
+    values[obj.id] = resolveObjectBinding(project, obj, binding)
   }
 
   return values
@@ -63,4 +96,20 @@ export function getDisplayText(project, objectId, resolvedValues) {
     return resolvedValues[objectId] ?? obj.textBinding.fallback ?? obj.text ?? ''
   }
   return obj.text ?? ''
+}
+
+/**
+ * @param {object} project
+ * @param {string} objectId
+ * @param {Record<string, string>} resolvedValues
+ */
+export function getDisplayImagePath(project, objectId, resolvedValues) {
+  const obj = project.objects.find((o) => o.id === objectId)
+  if (!obj || (obj.type !== 'image' && obj.type !== 'gif') || !obj.imageBinding) return ''
+  const asset = project.assets.find((a) => a.id === obj.assetId)
+  return resolveImageDisplayPath(
+    resolvedValues[objectId],
+    obj.imageBinding,
+    asset?.path,
+  )
 }

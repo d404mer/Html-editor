@@ -1,12 +1,15 @@
-import { Group, Image as KonvaImage, Rect } from 'react-konva'
+import { Group, Image as KonvaImage, Rect, Text } from 'react-konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import { useImage } from '../hooks/useImage'
+import { useDataLiveUpdates } from '../hooks/useDataLiveUpdates'
 import { useProjectStore } from '../store/projectStore'
 import type { CanvasObject } from '../types/project'
 import { DEFAULT_CROP } from '../types/project'
+import { getProjectFileUrl } from '../utils/bindingPath'
 
 interface ImageObjectProps {
   object: CanvasObject
+  displayImagePath?: string
   selected: boolean
   onSelect: (id: string, additive?: boolean) => void
   onDragEnd: (id: string, x: number, y: number) => void
@@ -14,19 +17,30 @@ interface ImageObjectProps {
 
 export default function ImageObjectNode({
   object,
+  displayImagePath,
   selected,
   onSelect,
   onDragEnd,
 }: ImageObjectProps) {
+  const projectId = useProjectStore((s) => s.project.id)
   const getAssetUrl = useProjectStore((s) => s.getAssetUrl)
   const asset = useProjectStore((s) =>
     s.project.assets.find((a) => a.id === object.assetId),
   )
+  const dataLiveVersion = useDataLiveUpdates()
 
-  const src = asset ? getAssetUrl(asset) : undefined
+  const boundPath = object.imageBinding ? displayImagePath : undefined
+  const assetPath = asset?.path.replace(/\\/g, '/')
+  const relPath = boundPath || assetPath
+  const src = relPath
+    ? object.imageBinding
+      ? getProjectFileUrl(projectId, relPath, dataLiveVersion)
+      : getAssetUrl(asset!)
+    : undefined
   const image = useImage(src)
 
-  if (!object.visible || !asset) return null
+  if (!object.visible) return null
+  if (!relPath && !object.imageBinding) return null
 
   const crop = object.style.crop ?? DEFAULT_CROP
   const hasCrop =
@@ -74,6 +88,19 @@ export default function ImageObjectNode({
         />
       )}
 
+      {!image && relPath && (
+        <Text
+          text={relPath.split('/').pop() ?? 'image'}
+          width={object.width}
+          height={object.height}
+          align="center"
+          verticalAlign="middle"
+          fontSize={12}
+          fill="#6366f1"
+          listening={false}
+        />
+      )}
+
       {image && (
         <Group
           clipX={0}
@@ -112,6 +139,15 @@ export default function ImageObjectNode({
           stroke="#6366f1"
           strokeWidth={2}
           dash={[4, 4]}
+          listening={false}
+        />
+      )}
+
+      {object.imageBinding && !object.locked && (
+        <Rect
+          width={object.width}
+          height={12}
+          fill="rgba(16,185,129,0.85)"
           listening={false}
         />
       )}

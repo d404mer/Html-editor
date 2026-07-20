@@ -4,8 +4,8 @@ export type AssetType = 'image' | 'video' | 'svg' | 'gif'
 
 export type TextBindingMode = 'cell' | 'column'
 
-/** Привязка текстового объекта к полю Excel */
-export interface TextBinding {
+/** Привязка объекта к полю Excel (текст или путь к файлу) */
+export interface ExcelBinding {
   fileId: string
   sheet: string
   mode: TextBindingMode
@@ -15,9 +15,12 @@ export interface TextBinding {
   column?: string
   /** Номер строки в листе, 1-based (строка 1 — заголовки) */
   row?: number
-  /** Текст, если Excel недоступен или ячейка пуста */
+  /** Значение по умолчанию: текст или путь к файлу в проекте */
   fallback?: string
 }
+
+/** @deprecated alias — используйте ExcelBinding */
+export type TextBinding = ExcelBinding
 
 export interface DataFile {
   id: string
@@ -81,7 +84,9 @@ export interface CanvasObject {
   assetId?: string
   customCss?: string
   /** Привязка к Excel — текст берётся из файла data/ */
-  textBinding?: TextBinding
+  textBinding?: ExcelBinding
+  /** Привязка к Excel — путь к изображению берётся из файла data/ */
+  imageBinding?: ExcelBinding
 }
 
 export interface Asset {

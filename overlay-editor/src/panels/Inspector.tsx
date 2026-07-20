@@ -1,9 +1,13 @@
 import { useEffect } from 'react'
 import { useProjectStore } from '../store/projectStore'
-import type { CanvasObject, ObjectFit, TextBinding } from '../types/project'
+import type { CanvasObject, ExcelBinding, ObjectFit } from '../types/project'
 import { DEFAULT_CROP, DEFAULT_IMAGE_FILTERS } from '../types/project'
-import { useExcelSchema, defaultBinding } from '../hooks/useExcelSchema'
-import { useExcelValues, getObjectDisplayText } from '../hooks/useExcelValues'
+import { useExcelSchema, defaultBinding, defaultImageBinding } from '../hooks/useExcelSchema'
+import {
+  useExcelValues,
+  getObjectDisplayText,
+  getObjectDisplayImagePath,
+} from '../hooks/useExcelValues'
 import { cellRef } from '../utils/excel'
 import type { SheetSchema } from '../hooks/useExcelSchema'
 
@@ -43,11 +47,13 @@ function TextField({
   value,
   onChange,
   readOnly,
+  placeholder,
 }: {
   label: string
   value: string
   onChange?: (v: string) => void
   readOnly?: boolean
+  placeholder?: string
 }) {
   return (
     <label className="field">
@@ -57,6 +63,7 @@ function TextField({
         className="field-input"
         value={value}
         readOnly={readOnly}
+        placeholder={placeholder}
         onChange={onChange ? (e) => onChange(e.target.value) : undefined}
       />
     </label>
@@ -159,7 +166,7 @@ function ExcelPreviewTable({
   onPickCell,
 }: {
   sheet: SheetSchema
-  binding: TextBinding
+  binding: ExcelBinding
   onPickColumn: (column: string) => void
   onPickCell: (cell: string, column: string, row: number) => void
 }) {
@@ -224,37 +231,47 @@ function ExcelPreviewTable({
   )
 }
 
-function ExcelBindingInspector({ object }: { object: CanvasObject }) {
+function ExcelBindingPanel({
+  object,
+  binding,
+  setBinding,
+  previewValue,
+  previewLabel,
+  fallbackLabel,
+  fallbackPlaceholder,
+}: {
+  object: CanvasObject
+  binding: ExcelBinding | undefined
+  setBinding: (binding: ExcelBinding | undefined) => void
+  previewValue: string
+  previewLabel: string
+  fallbackLabel: string
+  fallbackPlaceholder: string
+}) {
   const project = useProjectStore((s) => s.project)
-  const setTextBinding = useProjectStore((s) => s.setTextBinding)
   const setLeftPanelTab = useProjectStore((s) => s.setLeftPanelTab)
-  const excelValues = useExcelValues()
-
-  const binding = object.textBinding
   const dataFiles = project.dataFiles ?? []
   const { schema, loading } = useExcelSchema(binding?.fileId)
-
   const currentSheet = schema?.sheets.find((s) => s.name === binding?.sheet)
-  const preview = getObjectDisplayText(object, excelValues)
 
   useEffect(() => {
     if (!binding || !schema || binding.sheet) return
     const first = schema.sheets[0]?.name
-    if (first) setTextBinding(object.id, { ...binding, sheet: first })
-  }, [binding, schema, object.id, setTextBinding])
+    if (first) setBinding({ ...binding, sheet: first })
+  }, [binding, schema, setBinding])
 
   useEffect(() => {
     if (!binding || !currentSheet || binding.mode !== 'column') return
     if (binding.column || !currentSheet.headers.length) return
-    setTextBinding(object.id, {
+    setBinding({
       ...binding,
       column: currentSheet.headers[0],
     })
-  }, [binding, currentSheet, object.id, setTextBinding])
+  }, [binding, currentSheet, setBinding])
 
-  const updateBinding = (patch: Partial<TextBinding>) => {
+  const updateBinding = (patch: Partial<ExcelBinding>) => {
     if (!binding) return
-    setTextBinding(object.id, { ...binding, ...patch })
+    setBinding({ ...binding, ...patch })
   }
 
   const enableBinding = () => {
@@ -263,7 +280,16 @@ function ExcelBindingInspector({ object }: { object: CanvasObject }) {
       setLeftPanelTab('data')
       return
     }
-    setTextBinding(object.id, defaultBinding(file.id, ''))
+    const asset = project.assets.find((a) => a.id === object.assetId)
+    const fallback =
+      object.type === 'text'
+        ? '—'
+        : asset?.path.replace(/\\/g, '/') ?? ''
+    const next =
+      object.type === 'text'
+        ? defaultBinding(file.id, '')
+        : defaultImageBinding(file.id, '', fallback)
+    setBinding(next)
   }
 
   return (
@@ -273,7 +299,7 @@ function ExcelBindingInspector({ object }: { object: CanvasObject }) {
         checked={!!binding}
         onChange={(enabled) => {
           if (enabled) enableBinding()
-          else setTextBinding(object.id, undefined)
+          else setBinding(undefined)
         }}
       />
 
@@ -295,7 +321,16 @@ function ExcelBindingInspector({ object }: { object: CanvasObject }) {
             onChange={(fileId) => {
               const file = dataFiles.find((f) => f.id === fileId)
               if (file) {
-                setTextBinding(object.id, defaultBinding(file.id, ''))
+                const asset = project.assets.find((a) => a.id === object.assetId)
+                const fallback =
+                  object.type === 'text'
+                    ? binding.fallback ?? '—'
+                    : asset?.path.replace(/\\/g, '/') ?? binding.fallback ?? ''
+                setBinding(
+                  object.type === 'text'
+                    ? defaultBinding(file.id, '', fallback)
+                    : defaultImageBinding(file.id, '', fallback),
+                )
               }
             }}
           />
@@ -323,7 +358,7 @@ function ExcelBindingInspector({ object }: { object: CanvasObject }) {
             ]}
             onChange={(mode) =>
               updateBinding({
-                mode: mode as TextBinding['mode'],
+                mode: mode as ExcelBinding['mode'],
               })
             }
           />
@@ -360,20 +395,29 @@ function ExcelBindingInspector({ object }: { object: CanvasObject }) {
           )}
 
           <TextField
-            label="Fallback"
+            label={fallbackLabel}
             value={binding.fallback ?? ''}
+            placeholder={fallbackPlaceholder}
             onChange={(fallback) => updateBinding({ fallback })}
           />
 
           <label className="field">
-            <span className="field-label">Текущее значение (из Excel)</span>
+            <span className="field-label">{previewLabel}</span>
             <input
               type="text"
               className="field-input"
-              value={preview}
+              value={previewValue}
               readOnly
             />
           </label>
+
+          {object.type !== 'text' && (
+            <span className="field-hint">
+              В Excel укажите путь относительно проекта, например{' '}
+              <code className="inline-code">assets/images/logo.png</code> или только{' '}
+              <code className="inline-code">logo.png</code>
+            </span>
+          )}
 
           {currentSheet && (
             <ExcelPreviewTable
@@ -394,6 +438,44 @@ function ExcelBindingInspector({ object }: { object: CanvasObject }) {
         </>
       )}
     </Section>
+  )
+}
+
+function ExcelBindingInspector({ object }: { object: CanvasObject }) {
+  const setTextBinding = useProjectStore((s) => s.setTextBinding)
+  const excelValues = useExcelValues()
+  const preview = getObjectDisplayText(object, excelValues)
+
+  return (
+    <ExcelBindingPanel
+      object={object}
+      binding={object.textBinding}
+      setBinding={(binding) => setTextBinding(object.id, binding)}
+      previewValue={preview}
+      previewLabel="Текущее значение (из Excel)"
+      fallbackLabel="Fallback"
+      fallbackPlaceholder="—"
+    />
+  )
+}
+
+function ImageExcelBindingInspector({ object }: { object: CanvasObject }) {
+  const project = useProjectStore((s) => s.project)
+  const setImageBinding = useProjectStore((s) => s.setImageBinding)
+  const excelValues = useExcelValues()
+  const asset = project.assets.find((a) => a.id === object.assetId)
+  const preview = getObjectDisplayImagePath(object, excelValues, asset?.path)
+
+  return (
+    <ExcelBindingPanel
+      object={object}
+      binding={object.imageBinding}
+      setBinding={(binding) => setImageBinding(object.id, binding)}
+      previewValue={preview}
+      previewLabel="Текущий путь (из Excel)"
+      fallbackLabel="Fallback (путь к файлу)"
+      fallbackPlaceholder="assets/images/logo.png"
+    />
   )
 }
 
@@ -570,6 +652,8 @@ function ImageInspector({ object }: { object: CanvasObject }) {
           onChange={(v) => patchFilter('blur', v)}
         />
       </Section>
+
+      <ImageExcelBindingInspector object={object} />
     </>
   )
 }

@@ -5,7 +5,7 @@ import type { KonvaEventObject } from 'konva/lib/Node'
 import ImageObjectNode from '../objects/ImageObject'
 import TextEditorOverlay, { useTextEditShortcuts } from './TextEditorOverlay'
 import { useProjectStore } from '../store/projectStore'
-import { useExcelValues, getObjectDisplayText } from '../hooks/useExcelValues'
+import { useExcelValues, getObjectDisplayText, getObjectDisplayImagePath } from '../hooks/useExcelValues'
 import { canEditTextInline } from '../utils/text'
 import type { CanvasObject } from '../types/project'
 
@@ -333,10 +333,16 @@ export default function Canvas() {
               )
             }
             if (obj.type === 'image' || obj.type === 'gif') {
+              const asset = project.assets.find((a) => a.id === obj.assetId)
               return (
                 <ImageObjectNode
                   key={obj.id}
                   object={obj}
+                  displayImagePath={getObjectDisplayImagePath(
+                    obj,
+                    excelValues,
+                    asset?.path,
+                  )}
                   selected={selectedObjectIds.includes(obj.id)}
                   onSelect={selectObject}
                   onDragEnd={handleDragEnd}

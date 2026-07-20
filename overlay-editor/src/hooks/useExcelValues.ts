@@ -12,8 +12,16 @@ export function useExcelValues(): Record<string, string> {
   const bindingKey = useProjectStore((s) =>
     JSON.stringify(
       s.project.objects
-        .filter((o) => o.type === 'text' && o.textBinding)
-        .map((o) => ({ id: o.id, b: o.textBinding })),
+        .filter(
+          (o) =>
+            (o.type === 'text' && o.textBinding) ||
+            ((o.type === 'image' || o.type === 'gif') && o.imageBinding),
+        )
+        .map((o) => ({
+          id: o.id,
+          kind: o.textBinding ? 'text' : 'image',
+          b: o.textBinding ?? o.imageBinding,
+        })),
     ),
   )
   const dataFilesKey = useProjectStore((s) =>
@@ -87,6 +95,9 @@ export function useExcelValues(): Record<string, string> {
   return values
 }
 
+import { resolveImageDisplayPath } from '../utils/bindingPath'
+import type { CanvasObject } from '../types/project'
+
 export function getObjectDisplayText(
   object: { id: string; type: string; text?: string; textBinding?: { fallback?: string } },
   excelValues: Record<string, string>,
@@ -96,4 +107,18 @@ export function getObjectDisplayText(
     return excelValues[object.id] ?? object.textBinding.fallback ?? object.text ?? ''
   }
   return object.text ?? ''
+}
+
+export function getObjectDisplayImagePath(
+  object: CanvasObject,
+  excelValues: Record<string, string>,
+  assetPath?: string,
+): string {
+  if (object.type !== 'image' && object.type !== 'gif') return assetPath ?? ''
+  if (!object.imageBinding) return assetPath ?? ''
+  return resolveImageDisplayPath(
+    excelValues[object.id],
+    object.imageBinding,
+    assetPath,
+  )
 }

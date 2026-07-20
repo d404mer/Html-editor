@@ -6,7 +6,7 @@ import type {
   ObjectStyle,
   Project,
   SyncStatus,
-  TextBinding,
+  ExcelBinding,
 } from '../types/project'
 import { DEFAULT_CROP, DEFAULT_IMAGE_FILTERS } from '../types/project'
 
@@ -43,7 +43,8 @@ interface ProjectStore extends EditorState {
   addImageObject: (asset: Asset, position?: { x: number; y: number }) => string
   addTextObject: (position?: { x: number; y: number }) => string
   replaceObjectAsset: (objectId: string, asset: Asset) => void
-  setTextBinding: (objectId: string, binding: TextBinding | undefined) => void
+  setTextBinding: (objectId: string, binding: ExcelBinding | undefined) => void
+  setImageBinding: (objectId: string, binding: ExcelBinding | undefined) => void
   updateTextContent: (objectId: string, content: string) => void
   setEditingTextId: (id: string | null) => void
   deleteSelectedObjects: () => void
@@ -264,6 +265,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   setTextBinding: (objectId, textBinding) => {
     get().updateObject(objectId, { textBinding })
+  },
+
+  setImageBinding: (objectId, imageBinding) => {
+    get().updateObject(objectId, { imageBinding })
   },
 
   updateTextContent: (objectId, content) => {

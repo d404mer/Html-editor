@@ -56,7 +56,15 @@ const LIVE_RELOAD_SCRIPT = `(function () {
             .then(function (values) {
               Object.keys(values).forEach(function (id) {
                 document.querySelectorAll('[data-excel-bind="' + id + '"]').forEach(function (el) {
-                  el.textContent = values[id];
+                  var kind = el.getAttribute('data-excel-bind-kind');
+                  if (kind === 'image' || el.tagName === 'IMG') {
+                    var next = values[id];
+                    if (!next) return;
+                    var sep = next.indexOf('?') >= 0 ? '&' : '?';
+                    el.setAttribute('src', next + sep + 't=' + Date.now());
+                  } else {
+                    el.textContent = values[id];
+                  }
                 });
               });
             })
@@ -172,8 +180,16 @@ app.post('/api/projects/:id/data/resolve', async (req, res) => {
       projectId: project.id,
       dataFiles: (project.dataFiles ?? []).map((f) => f.name),
       bindings: (project.objects ?? [])
-        .filter((o) => o.type === 'text' && o.textBinding)
-        .map((o) => ({ id: o.id, binding: o.textBinding })),
+        .filter(
+          (o) =>
+            (o.type === 'text' && o.textBinding) ||
+            ((o.type === 'image' || o.type === 'gif') && o.imageBinding),
+        )
+        .map((o) => ({
+          id: o.id,
+          kind: o.textBinding ? 'text' : 'image',
+          binding: o.textBinding ?? o.imageBinding,
+        })),
       values,
     })
     res.json(values)
@@ -235,6 +251,9 @@ app.delete('/api/projects/:id/data/:fileId', async (req, res) => {
     project.objects = project.objects.map((obj) => {
       if (obj.textBinding?.fileId === req.params.fileId) {
         return { ...obj, textBinding: undefined }
+      }
+      if (obj.imageBinding?.fileId === req.params.fileId) {
+        return { ...obj, imageBinding: undefined }
       }
       return obj
     })

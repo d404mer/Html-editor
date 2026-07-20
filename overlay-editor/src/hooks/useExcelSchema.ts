@@ -56,13 +56,28 @@ export async function uploadDataFile(projectId: string, file: File) {
   return res.json()
 }
 
-export function defaultBinding(fileId: string, sheet: string): TextBinding {
+export function defaultBinding(fileId: string, sheet: string, fallback = '—'): TextBinding {
   return {
     fileId,
     sheet,
     mode: 'column',
     column: '',
     row: 2,
-    fallback: '—',
+    fallback,
+  }
+}
+
+export function defaultImageBinding(
+  fileId: string,
+  sheet: string,
+  fallbackPath = '',
+): TextBinding {
+  return {
+    fileId,
+    sheet,
+    mode: 'column',
+    column: '',
+    row: 2,
+    fallback: fallbackPath,
   }
 }
