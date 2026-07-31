@@ -1,22 +1,24 @@
 import Toolbar from './components/Toolbar'
+import ProjectTabs from './components/ProjectTabs'
 import Canvas from './canvas/Canvas'
 import Layers from './panels/Layers'
 import Inspector from './panels/Inspector'
 import Assets from './panels/Assets'
 import DataPanel from './panels/Data'
 import { useProjectStore } from './store/projectStore'
-import { useProjectInit, useProjectSync } from './hooks/useProjectSync'
+import { useProjectInit, useMultiProjectSync } from './hooks/useProjectSync'
+import { useAppInitialized } from './hooks/useActiveProject'
 import './App.css'
 
 export default function App() {
   const leftPanelTab = useProjectStore((s) => s.leftPanelTab)
   const setLeftPanelTab = useProjectStore((s) => s.setLeftPanelTab)
-  const projectLoaded = useProjectStore((s) => s.projectLoaded)
+  const appInitialized = useAppInitialized()
 
   useProjectInit()
-  useProjectSync()
+  useMultiProjectSync()
 
-  if (!projectLoaded) {
+  if (!appInitialized) {
     return (
       <div className="editor loading-screen">
         <p>Загрузка проекта…</p>
@@ -27,6 +29,7 @@ export default function App() {
   return (
     <div className="editor">
       <Toolbar />
+      <ProjectTabs />
 
       <div className="editor-body">
         <aside className="sidebar sidebar-left">

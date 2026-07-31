@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 
 const SYNC_LABELS = {
@@ -9,6 +10,7 @@ const SYNC_LABELS = {
 
 export default function Toolbar() {
   const project = useProjectStore((s) => s.project)
+  const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const zoom = useProjectStore((s) => s.zoom)
   const showGrid = useProjectStore((s) => s.showGrid)
   const syncStatus = useProjectStore((s) => s.syncStatus)
@@ -16,10 +18,25 @@ export default function Toolbar() {
   const toggleGrid = useProjectStore((s) => s.toggleGrid)
   const setLeftPanelTab = useProjectStore((s) => s.setLeftPanelTab)
   const addTextObject = useProjectStore((s) => s.addTextObject)
+  const renameActiveProject = useProjectStore((s) => s.renameActiveProject)
+
+  const [renaming, setRenaming] = useState(false)
+  const [renameValue, setRenameValue] = useState(project.name)
 
   const openPreview = () => {
-    if (project.id) {
-      window.open(`/preview/${project.id}/`, '_blank')
+    if (activeProjectId) {
+      window.open(`/preview/${activeProjectId}/`, '_blank')
+    }
+  }
+
+  const commitRename = async () => {
+    const next = renameValue.trim()
+    setRenaming(false)
+    if (!next || next === project.name) return
+    try {
+      await renameActiveProject(next)
+    } catch {
+      setRenameValue(project.name)
     }
   }
 
@@ -31,7 +48,33 @@ export default function Toolbar() {
           <span className="logo-text">Overlay Editor</span>
         </div>
         <div className="toolbar-divider" />
-        <span className="project-name">{project.name}</span>
+        {renaming ? (
+          <input
+            className="project-name-input"
+            value={renameValue}
+            autoFocus
+            onChange={(e) => setRenameValue(e.target.value)}
+            onBlur={commitRename}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitRename()
+              if (e.key === 'Escape') {
+                setRenameValue(project.name)
+                setRenaming(false)
+              }
+            }}
+          />
+        ) : (
+          <span
+            className="project-name project-name-editable"
+            title="Двойной клик — переименовать"
+            onDoubleClick={() => {
+              setRenameValue(project.name)
+              setRenaming(true)
+            }}
+          >
+            {project.name}
+          </span>
+        )}
         {syncStatus !== 'idle' && (
           <span className={`sync-status sync-${syncStatus}`}>
             {SYNC_LABELS[syncStatus]}
@@ -95,7 +138,7 @@ export default function Toolbar() {
             type="button"
             className="tool-btn"
             onClick={() => setZoom(0.5)}
-            title="Сбросить масштаб"
+            title="Сбросить масс-scale"
           >
             ⊡
           </button>

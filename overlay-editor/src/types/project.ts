@@ -111,6 +111,25 @@ export type LeftPanelTab = 'layers' | 'assets' | 'data'
 
 export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error'
 
+export interface ProjectSummary {
+  id: string
+  name: string
+  updatedAt?: string
+}
+
+export interface OpenProjectState {
+  project: Project
+  loaded: boolean
+  syncStatus: SyncStatus
+  selectedObjectIds: string[]
+  zoom: number
+  panX: number
+  panY: number
+  showGrid: boolean
+  leftPanelTab: LeftPanelTab
+  editingTextId: string | null
+}
+
 export interface EditorState {
   selectedObjectIds: string[]
   zoom: number

@@ -82,27 +82,27 @@ function subscribe(listener: DataEventListener) {
   }
 }
 
-/** Increments when backend detects Excel/data changes for the active project. */
-export function useDataLiveUpdates(): number {
-  const projectId = useProjectStore((s) => s.project.id)
-  const projectLoaded = useProjectStore((s) => s.projectLoaded)
-  const [version, setVersion] = useState(0)
+/** Per-project version bump when backend detects Excel/data changes. */
+export function useDataLiveUpdates(projectId?: string | null): number {
+  const activeProjectId = useProjectStore((s) => s.activeProjectId)
+  const tabOrderKey = useProjectStore((s) => s.tabOrder.join(','))
+  const targetId = projectId ?? activeProjectId
+  const [versions, setVersions] = useState<Record<string, number>>({})
 
   useEffect(() => {
-    if (!projectLoaded || !projectId) return
+    if (!tabOrderKey) return
+
+    const openIds = tabOrderKey.split(',').filter(Boolean)
 
     return subscribe((changedProjectId) => {
-      if (changedProjectId === projectId) {
-        excelDebug('dataLiveUpdate match', { projectId })
-        setVersion((v) => {
-          excelDebug('dataLiveUpdate version bump', { projectId, from: v, to: v + 1 })
-          return v + 1
-        })
-      } else {
-        excelDebug('dataLiveUpdate mismatch', { active: projectId, changed: changedProjectId })
-      }
+      if (!openIds.includes(changedProjectId)) return
+      excelDebug('dataLiveUpdate', { changedProjectId })
+      setVersions((v) => ({
+        ...v,
+        [changedProjectId]: (v[changedProjectId] ?? 0) + 1,
+      }))
     })
-  }, [projectId, projectLoaded])
+  }, [tabOrderKey])
 
-  return version
+  return targetId ? (versions[targetId] ?? 0) : 0
 }

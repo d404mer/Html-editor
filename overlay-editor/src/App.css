@@ -7,6 +7,131 @@
   color: var(--text-primary);
 }
 
+.project-name-editable {
+  cursor: text;
+}
+
+.project-name-input {
+  background: var(--input-bg, #1e1e28);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 13px;
+  padding: 2px 8px;
+  min-width: 120px;
+  max-width: 240px;
+}
+
+/* Project tabs */
+.project-tabs-bar {
+  display: flex;
+  align-items: stretch;
+  height: 36px;
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 4px;
+  padding: 0 8px;
+}
+
+.project-tabs-scroll {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.project-tab {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: 6px 6px 0 0;
+  background: rgba(255, 255, 255, 0.03);
+  flex-shrink: 0;
+  max-width: 200px;
+}
+
+.project-tab.active {
+  background: var(--editor-bg);
+  border-bottom-color: var(--editor-bg);
+}
+
+.project-tab.unsaved .project-tab-name {
+  font-style: italic;
+}
+
+.project-tab-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 0 10px;
+  min-width: 0;
+}
+
+.project-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.project-tab-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f59e0b;
+  flex-shrink: 0;
+}
+
+.project-tab-close {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 8px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.project-tab-close:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.project-tabs-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.project-tab-action {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 10px;
+  height: 28px;
+}
+
+.project-tab-action:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.project-tab-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Toolbar */
 .toolbar {
   display: flex;

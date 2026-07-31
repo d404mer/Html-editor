@@ -1,90 +1,148 @@
 import { useEffect, useRef } from 'react'
-import { useProjectStore } from '../store/projectStore'
+import { fetchWithRetry } from '../utils/apiFetch'
 import type { Project } from '../types/project'
+import {
+  OPEN_TABS_STORAGE_KEY,
+  useProjectStore,
+} from '../store/projectStore'
 
 const SYNC_DEBOUNCE_MS = 300
 
-export async function fetchOrCreateProject(): Promise<Project> {
-  const listRes = await fetch('/api/projects')
-  if (!listRes.ok) throw new Error('Failed to list projects')
-
-  const projects: { id: string; name: string }[] = await listRes.json()
-
-  if (projects.length > 0) {
-    const res = await fetch(`/api/projects/${projects[0].id}`)
-    if (!res.ok) throw new Error('Failed to load project')
-    return res.json()
-  }
-
-  const createRes = await fetch('/api/projects', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: 'Untitled Project' }),
-  })
-  if (!createRes.ok) throw new Error('Failed to create project')
-  return createRes.json()
+interface StoredTabs {
+  tabOrder?: string[]
+  activeProjectId?: string | null
 }
 
-export function useProjectSync() {
-  const project = useProjectStore((s) => s.project)
-  const projectLoaded = useProjectStore((s) => s.projectLoaded)
-  const setSyncStatus = useProjectStore((s) => s.setSyncStatus)
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const lastSyncedRef = useRef<string>('')
+export async function fetchProject(projectId: string): Promise<Project> {
+  const res = await fetchWithRetry(`/api/projects/${projectId}`)
+  if (!res.ok) throw new Error('Failed to load project')
+  return res.json()
+}
+
+export function useMultiProjectSync() {
+  const openProjects = useProjectStore((s) => s.openProjects)
+  const setProjectSyncStatus = useProjectStore((s) => s.setProjectSyncStatus)
+  const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  const lastSyncedRef = useRef<Map<string, string>>(new Map())
 
   useEffect(() => {
-    if (!projectLoaded || !project.id) return
+    const timers = timersRef.current
 
-    const serialized = JSON.stringify(project)
-    if (serialized === lastSyncedRef.current) return
+    for (const [projectId, state] of Object.entries(openProjects)) {
+      if (!state.loaded) continue
 
-    if (timerRef.current) clearTimeout(timerRef.current)
+      const serialized = JSON.stringify(state.project)
+      if (serialized === lastSyncedRef.current.get(projectId)) continue
 
-    timerRef.current = setTimeout(async () => {
-      setSyncStatus('syncing')
-      try {
-        const res = await fetch(`/api/projects/${project.id}/sync`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: serialized,
-        })
-        if (!res.ok) throw new Error('Sync failed')
-        lastSyncedRef.current = serialized
-        setSyncStatus('synced')
-      } catch {
-        setSyncStatus('error')
-      }
-    }, SYNC_DEBOUNCE_MS)
+      const existing = timers.get(projectId)
+      if (existing) clearTimeout(existing)
+
+      timers.set(
+        projectId,
+        setTimeout(async () => {
+          setProjectSyncStatus(projectId, 'syncing')
+          try {
+            const res = await fetch(`/api/projects/${projectId}/sync`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: serialized,
+            })
+            if (!res.ok) throw new Error('Sync failed')
+            lastSyncedRef.current.set(projectId, serialized)
+            setProjectSyncStatus(projectId, 'synced')
+          } catch {
+            setProjectSyncStatus(projectId, 'error')
+          }
+        }, SYNC_DEBOUNCE_MS),
+      )
+    }
 
     return () => {
-      if (timerRef.current) clearTimeout(timerRef.current)
+      for (const timer of timers.values()) {
+        clearTimeout(timer)
+      }
     }
-  }, [project, projectLoaded, setSyncStatus])
+  }, [openProjects, setProjectSyncStatus])
 }
 
 export function useProjectInit() {
-  const setProject = useProjectStore((s) => s.setProject)
-  const setProjectLoaded = useProjectStore((s) => s.setProjectLoaded)
-  const setSyncStatus = useProjectStore((s) => s.setSyncStatus)
+  const openProject = useProjectStore((s) => s.openProject)
+  const setActiveProject = useProjectStore((s) => s.setActiveProject)
+  const createProject = useProjectStore((s) => s.createProject)
+  const setAppInitialized = useProjectStore((s) => s.setAppInitialized)
 
   useEffect(() => {
     let cancelled = false
 
     ;(async () => {
       try {
-        const project = await fetchOrCreateProject()
-        if (!cancelled) {
-          setProject(project)
-          setProjectLoaded(true)
-          setSyncStatus('synced')
+        const listRes = await fetchWithRetry('/api/projects')
+        if (!listRes.ok) throw new Error('Failed to list projects')
+        const list: { id: string; name: string }[] = await listRes.json()
+
+        let stored: StoredTabs = {}
+        try {
+          stored = JSON.parse(
+            localStorage.getItem(OPEN_TABS_STORAGE_KEY) ?? '{}',
+          ) as StoredTabs
+        } catch {
+          stored = {}
         }
+
+        const idsToOpen = (stored.tabOrder ?? []).filter((id) =>
+          list.some((p) => p.id === id),
+        )
+
+        if (idsToOpen.length === 0 && list.length > 0) {
+          idsToOpen.push(list[0].id)
+        }
+
+        let opened = 0
+        let firstId: string | null = null
+        for (const id of idsToOpen) {
+          try {
+            const project = await fetchProject(id)
+            if (!cancelled) {
+              if (!firstId) firstId = project.id
+              openProject(project, { activate: false })
+              opened++
+            }
+          } catch {
+            // skip missing projects
+          }
+        }
+
+        if (!cancelled && opened === 0) {
+          await createProject('Untitled Project')
+        } else if (!cancelled) {
+          const target =
+            stored.activeProjectId &&
+            useProjectStore.getState().openProjects[stored.activeProjectId]
+              ? stored.activeProjectId
+              : firstId
+          if (target) setActiveProject(target)
+        }
+
+        if (!cancelled) setAppInitialized(true)
       } catch {
-        if (!cancelled) setSyncStatus('error')
+        if (!cancelled) {
+          try {
+            await createProject('Untitled Project')
+            setAppInitialized(true)
+          } catch {
+            setAppInitialized(false)
+          }
+        }
       }
     })()
 
     return () => {
       cancelled = true
     }
-  }, [setProject, setProjectLoaded, setSyncStatus])
+  }, [openProject, setActiveProject, createProject, setAppInitialized])
+}
+
+/** @deprecated */
+export function useProjectSync() {
+  useMultiProjectSync()
 }

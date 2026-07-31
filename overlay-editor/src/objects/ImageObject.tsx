@@ -22,7 +22,7 @@ export default function ImageObjectNode({
   onSelect,
   onDragEnd,
 }: ImageObjectProps) {
-  const projectId = useProjectStore((s) => s.project.id)
+  const projectId = useProjectStore((s) => s.activeProjectId ?? s.project.id)
   const getAssetUrl = useProjectStore((s) => s.getAssetUrl)
   const asset = useProjectStore((s) =>
     s.project.assets.find((a) => a.id === object.assetId),

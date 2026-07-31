@@ -2,6 +2,8 @@ import express from 'express'
 import multer from 'multer'
 import path from 'node:path'
 import fs from 'node:fs/promises'
+import os from 'node:os'
+import AdmZip from 'adm-zip'
 import { createServer } from 'node:http'
 import { WebSocketServer } from 'ws'
 import chokidar from 'chokidar'
@@ -21,6 +23,9 @@ import {
   saveDataFile,
   deleteDataFile,
   getDataFilePath,
+  deleteProject,
+  renameProject,
+  importProjectFromDir,
 } from './storage/projectManager.js'
 import { exportProject, EXCEL_BIND_SCRIPT } from './generator/exportProject.js'
 import { resolveProjectBindings } from './services/bindingResolver.js'
@@ -136,6 +141,66 @@ app.get('/api/projects/:id', async (req, res) => {
     res.json(project)
   } catch (err) {
     res.status(404).json({ error: 'Project not found' })
+  }
+})
+
+app.patch('/api/projects/:id', async (req, res) => {
+  try {
+    const name = req.body?.name
+    if (!name || typeof name !== 'string') {
+      return res.status(400).json({ error: 'name is required' })
+    }
+    const project = await renameProject(req.params.id, name.trim())
+    res.json(project)
+  } catch (err) {
+    res.status(404).json({ error: err.message })
+  }
+})
+
+app.delete('/api/projects/:id', async (req, res) => {
+  try {
+    await loadProject(req.params.id)
+    await deleteProject(req.params.id)
+    res.json({ ok: true })
+  } catch (err) {
+    res.status(404).json({ error: 'Project not found' })
+  }
+})
+
+app.post('/api/projects/import', upload.single('file'), async (req, res) => {
+  let tempDir = null
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' })
+
+    tempDir = path.join(os.tmpdir(), `overlay-import-${crypto.randomUUID()}`)
+    await fs.mkdir(tempDir, { recursive: true })
+
+    const zip = new AdmZip(req.file.buffer)
+    zip.extractAllTo(tempDir, true)
+
+    let projectRoot = tempDir
+    const directJson = path.join(tempDir, 'project.json')
+    try {
+      await fs.access(directJson)
+    } catch {
+      const entries = await fs.readdir(tempDir, { withFileTypes: true })
+      const subdirs = entries.filter((e) => e.isDirectory())
+      if (subdirs.length === 1) {
+        projectRoot = path.join(tempDir, subdirs[0].name)
+      }
+    }
+
+    let project = await importProjectFromDir(projectRoot)
+    project = await syncDataFilesFromDisk(project)
+    await syncProjectFiles(project)
+    broadcast({ type: 'reload', projectId: project.id })
+    res.json(project)
+  } catch (err) {
+    res.status(400).json({ error: err.message })
+  } finally {
+    if (tempDir) {
+      await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {})
+    }
   }
 })
 
