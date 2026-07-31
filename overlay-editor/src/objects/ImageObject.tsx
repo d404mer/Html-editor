@@ -13,6 +13,7 @@ interface ImageObjectProps {
   selected: boolean
   onSelect: (id: string, additive?: boolean) => void
   onDragEnd: (id: string, x: number, y: number) => void
+  onDragStart?: () => void
 }
 
 export default function ImageObjectNode({
@@ -21,6 +22,7 @@ export default function ImageObjectNode({
   selected,
   onSelect,
   onDragEnd,
+  onDragStart,
 }: ImageObjectProps) {
   const projectId = useProjectStore((s) => s.activeProjectId ?? s.project.id)
   const getAssetUrl = useProjectStore((s) => s.getAssetUrl)
@@ -74,6 +76,7 @@ export default function ImageObjectNode({
       draggable={!object.locked}
       onClick={handleClick}
       onTap={handleClick}
+      onDragStart={onDragStart}
       onDragEnd={(e) => onDragEnd(object.id, e.target.x(), e.target.y())}
     >
       {!image && (

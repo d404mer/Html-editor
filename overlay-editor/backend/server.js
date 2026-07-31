@@ -26,6 +26,9 @@ import {
   deleteProject,
   renameProject,
   importProjectFromDir,
+  syncAssetsFromDisk,
+  getProjectPaths,
+  revealProjectPath,
 } from './storage/projectManager.js'
 import { exportProject, EXCEL_BIND_SCRIPT } from './generator/exportProject.js'
 import { resolveProjectBindings } from './services/bindingResolver.js'
@@ -282,6 +285,39 @@ app.post('/api/projects/:id/data/scan', async (req, res) => {
     let project = await loadProject(req.params.id)
     project = await syncDataFilesFromDisk(project)
     await saveProject(project)
+    res.json(project)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.get('/api/projects/:id/paths', async (req, res) => {
+  try {
+    await loadProject(req.params.id)
+    res.json(getProjectPaths(req.params.id))
+  } catch (err) {
+    res.status(404).json({ error: err.message })
+  }
+})
+
+app.post('/api/projects/:id/reveal', async (req, res) => {
+  try {
+    const project = await loadProject(req.params.id)
+    const opened = await revealProjectPath(project, req.body ?? {})
+    res.json({ ok: true, path: opened })
+  } catch (err) {
+    res.status(err.message === 'Asset not found' || err.message === 'Path not found' ? 404 : 500).json({
+      error: err.message,
+    })
+  }
+})
+
+app.post('/api/projects/:id/assets/scan', async (req, res) => {
+  try {
+    let project = await loadProject(req.params.id)
+    project = await syncAssetsFromDisk(project)
+    await saveProject(project)
+    await exportProject(project)
     res.json(project)
   } catch (err) {
     res.status(500).json({ error: err.message })

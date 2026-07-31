@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { scanDataFiles, uploadDataFile } from '../hooks/useExcelSchema'
+import { revealProjectFolder } from '../utils/projectFolders'
 
 export default function DataPanel() {
   const project = useProjectStore((s) => s.project)
@@ -47,6 +48,15 @@ export default function DataPanel() {
     }
   }
 
+  const handleRevealFolder = async () => {
+    if (!project.id) return
+    try {
+      await revealProjectFolder(project.id, { target: 'data' })
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Не удалось открыть папку')
+    }
+  }
+
   const handleDelete = async (fileId: string) => {
     if (!confirm('Удалить файл данных?')) return
     const res = await fetch(`/api/projects/${project.id}/data/${fileId}`, {
@@ -77,6 +87,14 @@ export default function DataPanel() {
           title="Найти .xlsx/.csv в папке data проекта"
         >
           {scanning ? '…' : '↻ Скан'}
+        </button>
+        <button
+          type="button"
+          className="btn-secondary assets-upload-btn-sm"
+          onClick={handleRevealFolder}
+          title="Открыть папку data в проводнике"
+        >
+          📁 Папка
         </button>
         <input
           ref={fileInputRef}

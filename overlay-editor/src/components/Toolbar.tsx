@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
+import { revealProjectFolder } from '../utils/projectFolders'
 
 const SYNC_LABELS = {
   idle: '',
@@ -19,6 +20,20 @@ export default function Toolbar() {
   const setLeftPanelTab = useProjectStore((s) => s.setLeftPanelTab)
   const addTextObject = useProjectStore((s) => s.addTextObject)
   const renameActiveProject = useProjectStore((s) => s.renameActiveProject)
+  const undo = useProjectStore((s) => s.undo)
+  const redo = useProjectStore((s) => s.redo)
+  const canUndo = useProjectStore((s) => {
+    const id = s.activeProjectId
+    if (!id) return false
+    return (s.openProjects[id]?.historyIndex ?? 0) > 0
+  })
+  const canRedo = useProjectStore((s) => {
+    const id = s.activeProjectId
+    const st = id ? s.openProjects[id] : null
+    if (!st) return false
+    return st.historyIndex < st.history.length - 1
+  })
+  const requestFitToView = useProjectStore((s) => s.requestFitToView)
 
   const [renaming, setRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState(project.name)
@@ -37,6 +52,15 @@ export default function Toolbar() {
       await renameActiveProject(next)
     } catch {
       setRenameValue(project.name)
+    }
+  }
+
+  const handleRevealProject = async () => {
+    if (!activeProjectId) return
+    try {
+      await revealProjectFolder(activeProjectId, { target: 'project' })
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Не удалось открыть папку')
     }
   }
 
@@ -86,6 +110,25 @@ export default function Toolbar() {
         <button
           type="button"
           className="tool-btn"
+          title="Отменить (Ctrl+Z)"
+          disabled={!canUndo}
+          onClick={undo}
+        >
+          ↶
+        </button>
+        <button
+          type="button"
+          className="tool-btn"
+          title="Повторить (Ctrl+Shift+Z)"
+          disabled={!canRedo}
+          onClick={redo}
+        >
+          ↷
+        </button>
+        <div className="toolbar-divider" />
+        <button
+          type="button"
+          className="tool-btn"
           title="Добавить текст"
           onClick={() => addTextObject()}
         >
@@ -108,6 +151,14 @@ export default function Toolbar() {
       </div>
 
       <div className="toolbar-right">
+        <button
+          type="button"
+          className="tool-btn"
+          title="Открыть папку проекта"
+          onClick={handleRevealProject}
+        >
+          📁
+        </button>
         <button
           type="button"
           className={`tool-btn${showGrid ? ' active' : ''}`}
@@ -137,8 +188,8 @@ export default function Toolbar() {
           <button
             type="button"
             className="tool-btn"
-            onClick={() => setZoom(0.5)}
-            title="Сбросить масс-scale"
+            onClick={requestFitToView}
+            title="По размеру — вместить холст в окно"
           >
             ⊡
           </button>

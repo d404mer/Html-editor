@@ -1,6 +1,26 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { execFile, spawn } from 'node:child_process'
+import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
+
+const execFileAsync = promisify(execFile)
+
+/** explorer.exe on Windows often exits with code 1 even on success — spawn detached instead */
+function openWindowsExplorer(targetPath, select = false) {
+  const normalized = path.normalize(path.resolve(targetPath))
+  const args = select ? [`/select,${normalized}`] : [normalized]
+  return new Promise((resolve, reject) => {
+    const child = spawn('explorer.exe', args, {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    })
+    child.once('error', reject)
+    child.unref()
+    resolve()
+  })
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 export const PROJECTS_DIR = path.resolve(__dirname, '../projects')
@@ -66,6 +86,152 @@ export async function saveProject(project) {
 
 export function getDataDir(projectId) {
   return path.join(getProjectDir(projectId), 'data')
+}
+
+export function getAssetsDir(projectId) {
+  return path.join(getProjectDir(projectId), 'assets')
+}
+
+export function getProjectPaths(projectId) {
+  const projectDir = getProjectDir(projectId)
+  return {
+    projectDir,
+    assetsDir: path.join(projectDir, 'assets'),
+    assetsImagesDir: path.join(projectDir, 'assets', 'images'),
+    assetsVideosDir: path.join(projectDir, 'assets', 'videos'),
+    assetsSvgDir: path.join(projectDir, 'assets', 'svg'),
+    dataDir: path.join(projectDir, 'data'),
+  }
+}
+
+const MIME_BY_EXT = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
+}
+
+function inferAssetType(filename) {
+  const lower = filename.toLowerCase()
+  if (lower.endsWith('.gif')) return { type: 'gif', subdir: 'images' }
+  if (lower.endsWith('.svg')) return { type: 'svg', subdir: 'svg' }
+  if (/\.(mp4|webm|mov|mkv)$/.test(lower)) return { type: 'video', subdir: 'videos' }
+  return { type: 'image', subdir: 'images' }
+}
+
+function mimeFromFilename(filename) {
+  const ext = path.extname(filename).toLowerCase()
+  return MIME_BY_EXT[ext] ?? 'application/octet-stream'
+}
+
+/** Сканирует assets/* и добавляет новые файлы в project.assets */
+export async function syncAssetsFromDisk(project) {
+  const projectDir = getProjectDir(project.id)
+  const subdirs = ['images', 'videos', 'svg']
+
+  const existingPaths = new Set((project.assets ?? []).map((a) => a.path.replace(/\\/g, '/')))
+  const assets = [...(project.assets ?? [])]
+
+  for (const subdir of subdirs) {
+    const dir = path.join(projectDir, 'assets', subdir)
+    await fs.mkdir(dir, { recursive: true })
+    let entries = []
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true })
+    } catch {
+      entries = []
+    }
+
+    for (const entry of entries) {
+      if (!entry.isFile()) continue
+      const relPath = `assets/${subdir}/${entry.name}`.replace(/\\/g, '/')
+      if (existingPaths.has(relPath)) continue
+
+      const dash = entry.name.indexOf('-')
+      const id =
+        dash > 0 && dash <= 12
+          ? entry.name.slice(0, dash)
+          : crypto.randomUUID().slice(0, 8)
+
+      const inferred = inferAssetType(entry.name)
+      const type = inferred.type
+      const name = dash > 0 ? entry.name.slice(dash + 1) : entry.name
+
+      assets.push({
+        id,
+        type,
+        name,
+        path: relPath,
+        mimeType: mimeFromFilename(entry.name),
+      })
+      existingPaths.add(relPath)
+    }
+  }
+
+  project.assets = assets
+  return project
+}
+
+/**
+ * @param {string} targetPath absolute path to file or folder
+ * @param {{ select?: boolean }} [options]
+ */
+export async function revealInFolder(targetPath, options = {}) {
+  const resolved = path.resolve(targetPath)
+  try {
+    await fs.access(resolved)
+  } catch {
+    throw new Error('Path not found')
+  }
+
+  if (process.platform === 'win32') {
+    await openWindowsExplorer(resolved, options.select)
+    return
+  }
+  if (platform === 'darwin') {
+    if (options.select) {
+      await execFileAsync('open', ['-R', resolved])
+    } else {
+      await execFileAsync('open', [resolved])
+    }
+    return
+  }
+  const stat = await fs.stat(resolved)
+  const openPath = stat.isDirectory() ? resolved : path.dirname(resolved)
+  await execFileAsync('xdg-open', [openPath])
+}
+
+/**
+ * @param {object} project
+ * @param {{ target?: string, assetId?: string }} body
+ */
+export async function revealProjectPath(project, body) {
+  const paths = getProjectPaths(project.id)
+  const { target = 'assets', assetId } = body ?? {}
+
+  if (assetId) {
+    const asset = (project.assets ?? []).find((a) => a.id === assetId)
+    if (!asset) throw new Error('Asset not found')
+    const fullPath = path.join(paths.projectDir, asset.path)
+    await revealInFolder(fullPath, { select: true })
+    return fullPath
+  }
+
+  const map = {
+    project: paths.projectDir,
+    assets: paths.assetsDir,
+    assetsImages: paths.assetsImagesDir,
+    data: paths.dataDir,
+  }
+  const folder = map[target] ?? paths.assetsDir
+  await fs.mkdir(folder, { recursive: true })
+  await revealInFolder(folder)
+  return folder
 }
 
 /** Сканирует папку data/ и синхронизирует список Excel-файлов в project.dataFiles */

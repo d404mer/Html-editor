@@ -4,6 +4,8 @@ import type Konva from 'konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import ImageObjectNode from '../objects/ImageObject'
 import TextEditorOverlay, { useTextEditShortcuts } from './TextEditorOverlay'
+import { useEditorShortcuts } from '../hooks/useEditorShortcuts'
+import { filterImageDropFiles, uploadAsset } from '../utils/assetUpload'
 import { useProjectStore } from '../store/projectStore'
 import { useExcelValues, getObjectDisplayText, getObjectDisplayImagePath } from '../hooks/useExcelValues'
 import { canEditTextInline } from '../utils/text'
@@ -19,6 +21,7 @@ function TextObjectNode({
   isEditing,
   onSelect,
   onDragEnd,
+  onDragStart,
   onStartEdit,
 }: {
   object: CanvasObject
@@ -27,6 +30,7 @@ function TextObjectNode({
   isEditing: boolean
   onSelect: (id: string, additive?: boolean) => void
   onDragEnd: (id: string, x: number, y: number) => void
+  onDragStart?: () => void
   onStartEdit: (id: string) => void
 }) {
   if (!object.visible) return null
@@ -55,6 +59,7 @@ function TextObjectNode({
       onTap={handleClick}
       onDblClick={handleDblClick}
       onDblTap={handleDblClick}
+      onDragStart={onDragStart}
       onDragEnd={(e) => onDragEnd(object.id, e.target.x(), e.target.y())}
     >
       {object.style.backgroundColor && (
@@ -144,24 +149,55 @@ export default function Canvas() {
   const stageRef = useRef<Konva.Stage>(null)
   const transformerRef = useRef<Konva.Transformer>(null)
   const [size, setSize] = useState({ width: 800, height: 600 })
+  const spaceDownRef = useRef(false)
+  const isPanningRef = useRef(false)
+  const panSessionRef = useRef({ startX: 0, startY: 0, panX: 0, panY: 0 })
+  const editHistoryPushedRef = useRef(false)
+  const [panMode, setPanMode] = useState(false)
+  const [isPanning, setIsPanning] = useState(false)
+  const [fileDragOver, setFileDragOver] = useState(false)
+  const [dropping, setDropping] = useState(false)
+  const dragDepthRef = useRef(0)
 
   const project = useProjectStore((s) => s.project)
+  const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const zoom = useProjectStore((s) => s.zoom)
   const panX = useProjectStore((s) => s.panX)
   const panY = useProjectStore((s) => s.panY)
   const showGrid = useProjectStore((s) => s.showGrid)
   const selectedObjectIds = useProjectStore((s) => s.selectedObjectIds)
   const editingTextId = useProjectStore((s) => s.editingTextId)
+  const fitViewNonce = useProjectStore((s) =>
+    activeProjectId ? (s.openProjects[activeProjectId]?.fitViewNonce ?? 0) : 0,
+  )
+  const userHasPanned = useProjectStore((s) =>
+    activeProjectId ? (s.openProjects[activeProjectId]?.userHasPanned ?? false) : false,
+  )
   const setZoom = useProjectStore((s) => s.setZoom)
   const setPan = useProjectStore((s) => s.setPan)
+  const applyFitToView = useProjectStore((s) => s.applyFitToView)
+  const pushHistory = useProjectStore((s) => s.pushHistory)
   const selectObject = useProjectStore((s) => s.selectObject)
   const clearSelection = useProjectStore((s) => s.clearSelection)
   const updateObject = useProjectStore((s) => s.updateObject)
   const addImageObject = useProjectStore((s) => s.addImageObject)
+  const addAsset = useProjectStore((s) => s.addAsset)
   const setEditingTextId = useProjectStore((s) => s.setEditingTextId)
 
   const excelValues = useExcelValues()
   useTextEditShortcuts()
+  useEditorShortcuts()
+
+  const beginObjectEdit = useCallback(() => {
+    if (!editHistoryPushedRef.current) {
+      pushHistory()
+      editHistoryPushedRef.current = true
+    }
+  }, [pushHistory])
+
+  const endObjectEdit = useCallback(() => {
+    editHistoryPushedRef.current = false
+  }, [])
 
   useEffect(() => {
     const container = containerRef.current
@@ -179,10 +215,83 @@ export default function Canvas() {
   }, [])
 
   useEffect(() => {
-    const offsetX = (size.width - project.width * zoom) / 2
-    const offsetY = (size.height - project.height * zoom) / 2
-    setPan(offsetX, offsetY)
-  }, [size.width, size.height, project.width, project.height, zoom, setPan])
+    applyFitToView(size.width, size.height)
+  }, [project.id, fitViewNonce, applyFitToView, size.width, size.height])
+
+  useEffect(() => {
+    if (userHasPanned) return
+    applyFitToView(size.width, size.height)
+  }, [size.width, size.height, userHasPanned, applyFitToView])
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !e.repeat) {
+        const tag = (e.target as HTMLElement)?.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+        e.preventDefault()
+        spaceDownRef.current = true
+        setPanMode(true)
+      }
+    }
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        spaceDownRef.current = false
+        setPanMode(false)
+        isPanningRef.current = false
+        setIsPanning(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+    }
+  }, [])
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isPanningRef.current) return
+      const dx = e.clientX - panSessionRef.current.startX
+      const dy = e.clientY - panSessionRef.current.startY
+      setPan(
+        panSessionRef.current.panX + dx,
+        panSessionRef.current.panY + dy,
+        { userInitiated: true },
+      )
+    }
+    const onMouseUp = () => {
+      isPanningRef.current = false
+      setIsPanning(false)
+    }
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
+  }, [setPan])
+
+  const startPan = useCallback(
+    (clientX: number, clientY: number) => {
+      isPanningRef.current = true
+      setIsPanning(true)
+      panSessionRef.current = {
+        startX: clientX,
+        startY: clientY,
+        panX,
+        panY,
+      }
+    },
+    [panX, panY],
+  )
+
+  const handleContainerMouseDown = (e: React.MouseEvent) => {
+    if (e.button === 1 || (e.button === 0 && spaceDownRef.current)) {
+      e.preventDefault()
+      startPan(e.clientX, e.clientY)
+    }
+  }
 
   useEffect(() => {
     if (editingTextId) return
@@ -214,12 +323,13 @@ export default function Canvas() {
   )
 
   const handleStageClick = () => {
-    if (editingTextId) return
+    if (editingTextId || isPanningRef.current || spaceDownRef.current) return
     clearSelection()
   }
 
   const handleDragEnd = (id: string, x: number, y: number) => {
-    updateObject(id, { x: Math.round(x), y: Math.round(y) })
+    updateObject(id, { x: Math.round(x), y: Math.round(y) }, { skipHistory: true })
+    endObjectEdit()
   }
 
   const handleTransformEnd = (e: KonvaEventObject<Event>) => {
@@ -231,13 +341,18 @@ export default function Canvas() {
     node.scaleX(1)
     node.scaleY(1)
 
-    updateObject(id, {
-      x: Math.round(node.x()),
-      y: Math.round(node.y()),
-      width: Math.max(20, Math.round(node.width() * scaleX)),
-      height: Math.max(20, Math.round(node.height() * scaleY)),
-      rotation: Math.round(node.rotation()),
-    })
+    updateObject(
+      id,
+      {
+        x: Math.round(node.x()),
+        y: Math.round(node.y()),
+        width: Math.max(20, Math.round(node.width() * scaleX)),
+        height: Math.max(20, Math.round(node.height() * scaleY)),
+        rotation: Math.round(node.rotation()),
+      },
+      { skipHistory: true },
+    )
+    endObjectEdit()
   }
 
   const canvasToArtboard = useCallback(
@@ -251,25 +366,76 @@ export default function Canvas() {
     [panX, panY, zoom],
   )
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault()
-      const assetId = e.dataTransfer.getData('application/x-asset-id')
-      if (!assetId) return
+  const isDropPayload = (e: React.DragEvent) => {
+    const types = e.dataTransfer.types
+    return (
+      types.includes('Files') ||
+      types.includes('application/x-asset-id')
+    )
+  }
 
-      const asset = project.assets.find((a) => a.id === assetId)
-      if (!asset || (asset.type !== 'image' && asset.type !== 'gif')) return
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault()
+    if (!isDropPayload(e)) return
+    dragDepthRef.current += 1
+    setFileDragOver(true)
+  }
 
-      const pos = canvasToArtboard(e.clientX, e.clientY)
-      addImageObject(asset, pos)
-    },
-    [project.assets, canvasToArtboard, addImageObject],
-  )
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (!isDropPayload(e)) return
+    dragDepthRef.current -= 1
+    if (dragDepthRef.current <= 0) {
+      dragDepthRef.current = 0
+      setFileDragOver(false)
+    }
+  }
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
-    e.dataTransfer.dropEffect = 'copy'
+    if (isDropPayload(e)) {
+      e.dataTransfer.dropEffect = 'copy'
+    }
   }
+
+  const handleDrop = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault()
+      setFileDragOver(false)
+      dragDepthRef.current = 0
+
+      const assetId = e.dataTransfer.getData('application/x-asset-id')
+      if (assetId) {
+        const asset = project.assets.find((a) => a.id === assetId)
+        if (asset && (asset.type === 'image' || asset.type === 'gif')) {
+          const pos = canvasToArtboard(e.clientX, e.clientY)
+          addImageObject(asset, pos)
+        }
+        return
+      }
+
+      const files = filterImageDropFiles(e.dataTransfer.files)
+      if (!files.length || !project.id || dropping) return
+
+      setDropping(true)
+      const base = canvasToArtboard(e.clientX, e.clientY)
+      try {
+        for (let i = 0; i < files.length; i++) {
+          const asset = await uploadAsset(project.id, files[i])
+          addAsset(asset)
+          addImageObject(asset, {
+            x: base.x + i * 24,
+            y: base.y + i * 24,
+          })
+        }
+      } catch (err) {
+        console.error(err)
+        alert('Не удалось загрузить изображение')
+      } finally {
+        setDropping(false)
+      }
+    },
+    [project.assets, project.id, canvasToArtboard, addImageObject, addAsset, dropping],
+  )
 
   const sortedObjects = [...project.objects].sort(
     (a, b) => a.zIndex - b.zIndex,
@@ -282,9 +448,13 @@ export default function Canvas() {
   return (
     <div
       ref={containerRef}
-      className="canvas-container"
+      className={`canvas-container${panMode ? ' canvas-pan-mode' : ''}${isPanning ? ' canvas-panning' : ''}${fileDragOver ? ' canvas-file-drag-over' : ''}`}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onMouseDown={handleContainerMouseDown}
+      onContextMenu={(e) => e.button === 1 && e.preventDefault()}
     >
       <Stage
         ref={stageRef}
@@ -292,6 +462,7 @@ export default function Canvas() {
         height={size.height}
         onWheel={handleWheel}
         onClick={handleStageClick}
+        style={{ pointerEvents: panMode ? 'none' : 'auto' }}
       >
         <Layer x={panX} y={panY} scaleX={zoom} scaleY={zoom}>
           <Rect
@@ -327,6 +498,7 @@ export default function Canvas() {
                   selected={selectedObjectIds.includes(obj.id)}
                   isEditing={editingTextId === obj.id}
                   onSelect={selectObject}
+                  onDragStart={beginObjectEdit}
                   onDragEnd={handleDragEnd}
                   onStartEdit={setEditingTextId}
                 />
@@ -349,6 +521,7 @@ export default function Canvas() {
                   )}
                   selected={selectedObjectIds.includes(obj.id)}
                   onSelect={selectObject}
+                  onDragStart={beginObjectEdit}
                   onDragEnd={handleDragEnd}
                 />
               )
@@ -367,6 +540,7 @@ export default function Canvas() {
               anchorFill="#6366f1"
               borderStroke="#6366f1"
               rotateAnchorOffset={20}
+              onTransformStart={beginObjectEdit}
               onTransformEnd={handleTransformEnd}
             />
           )}
@@ -389,6 +563,9 @@ export default function Canvas() {
         {selectedObject?.type === 'text' && !editingTextId && (
           <span className="canvas-hint">Двойной клик / F2 — редактировать</span>
         )}
+        <span className="canvas-hint">Space / СКМ — перемещение по холсту</span>
+        <span className="canvas-hint">Перетащите изображение на холст</span>
+        {dropping && <span className="canvas-hint">Загрузка…</span>}
       </div>
     </div>
   )

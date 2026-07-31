@@ -128,6 +128,12 @@ export interface OpenProjectState {
   showGrid: boolean
   leftPanelTab: LeftPanelTab
   editingTextId: string | null
+  /** Snapshots of project.objects for undo/redo */
+  history: CanvasObject[][]
+  historyIndex: number
+  userHasPanned: boolean
+  /** Incremented to trigger fit-to-view in Canvas */
+  fitViewNonce: number
 }
 
 export interface EditorState {

@@ -368,6 +368,80 @@
   position: relative;
 }
 
+.canvas-container.canvas-pan-mode {
+  cursor: grab;
+}
+
+.canvas-container.canvas-panning {
+  cursor: grabbing;
+}
+
+.canvas-container.canvas-file-drag-over {
+  outline: 2px dashed #6366f1;
+  outline-offset: -4px;
+  background: rgba(99, 102, 241, 0.06);
+}
+
+.canvas-hint {
+  opacity: 0.85;
+}
+
+/* Assets panel extras */
+.assets-hint {
+  margin: 8px 12px 0;
+}
+
+.assets-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 0;
+  flex-wrap: wrap;
+}
+
+.assets-filter-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.assets-filter-btn.active {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: #6366f1;
+  color: var(--text-primary);
+}
+
+.assets-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.asset-path {
+  display: block;
+  font-size: 10px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assets-empty-filter {
+  grid-column: 1 / -1;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 24px;
+}
+
+.assets-toolbar {
+  padding: 8px 12px 0;
+}
+
 .canvas-info {
   position: absolute;
   bottom: 12px;

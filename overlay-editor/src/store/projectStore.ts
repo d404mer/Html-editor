@@ -14,6 +14,23 @@ import { fetchWithRetry } from '../utils/apiFetch'
 
 export const OPEN_TABS_STORAGE_KEY = 'overlay-editor.openTabs'
 
+const HISTORY_LIMIT = 50
+
+function cloneObjects(objects: CanvasObject[]): CanvasObject[] {
+  return structuredClone(objects)
+}
+
+function createInitialHistory(objects: CanvasObject[]) {
+  return {
+    history: [cloneObjects(objects)],
+    historyIndex: 0,
+  }
+}
+
+function idPrefixForType(type: CanvasObject['type']): string {
+  return type === 'text' ? 'txt' : 'img'
+}
+
 function nextZIndex(objects: CanvasObject[]): number {
   if (objects.length === 0) return 1
   return Math.max(...objects.map((o) => o.zIndex)) + 1
@@ -35,6 +52,25 @@ function createOpenProjectState(project: Project): OpenProjectState {
     showGrid: true,
     leftPanelTab: 'layers',
     editingTextId: null,
+    ...createInitialHistory(project.objects),
+    userHasPanned: false,
+    fitViewNonce: 0,
+  }
+}
+
+function ensureHistoryFields(state: OpenProjectState): OpenProjectState {
+  if (state.history?.length && state.historyIndex !== undefined) {
+    return {
+      ...state,
+      userHasPanned: state.userHasPanned ?? false,
+      fitViewNonce: state.fitViewNonce ?? 0,
+    }
+  }
+  return {
+    ...state,
+    ...createInitialHistory(state.project.objects),
+    userHasPanned: state.userHasPanned ?? false,
+    fitViewNonce: state.fitViewNonce ?? 0,
   }
 }
 
@@ -67,6 +103,7 @@ interface ProjectStore {
   leftPanelTab: LeftPanelTab
   syncStatus: SyncStatus
   editingTextId: string | null
+  clipboard: CanvasObject[] | null
 
   setAppInitialized: (initialized: boolean) => void
   openProject: (project: Project, options?: { activate?: boolean }) => void
@@ -82,12 +119,25 @@ interface ProjectStore {
   deleteProjectFromDisk: (projectId: string) => Promise<void>
 
   setZoom: (zoom: number) => void
-  setPan: (x: number, y: number) => void
+  setPan: (x: number, y: number, options?: { userInitiated?: boolean }) => void
+  applyFitToView: (containerW: number, containerH: number) => void
+  requestFitToView: () => void
   toggleGrid: () => void
+  pushHistory: () => void
+  undo: () => void
+  redo: () => void
+  canUndo: () => boolean
+  canRedo: () => boolean
+  copySelectedObjects: () => void
+  pasteObjects: (offset?: { x: number; y: number }) => void
   setLeftPanelTab: (tab: LeftPanelTab) => void
   selectObject: (id: string, additive?: boolean) => void
   clearSelection: () => void
-  updateObject: (id: string, patch: Partial<CanvasObject>) => void
+  updateObject: (
+    id: string,
+    patch: Partial<CanvasObject>,
+    options?: { skipHistory?: boolean },
+  ) => void
   updateObjectStyle: (id: string, patch: Partial<ObjectStyle>) => void
   toggleObjectVisibility: (id: string) => void
   toggleObjectLock: (id: string) => void
@@ -159,6 +209,55 @@ function patchProjectById(
   })
 }
 
+function appendHistory(
+  state: OpenProjectState,
+  newObjects: CanvasObject[],
+): OpenProjectState {
+  let history = state.history.slice(0, state.historyIndex + 1)
+  history.push(cloneObjects(newObjects))
+  if (history.length > HISTORY_LIMIT) {
+    history = history.slice(history.length - HISTORY_LIMIT)
+  }
+  return {
+    ...state,
+    project: { ...state.project, objects: newObjects },
+    history,
+    historyIndex: history.length - 1,
+  }
+}
+
+function mutateObjects(
+  set: (
+    partial:
+      | Partial<ProjectStore>
+      | ((state: ProjectStore) => Partial<ProjectStore>),
+  ) => void,
+  get: () => ProjectStore,
+  mutator: (objects: CanvasObject[]) => CanvasObject[],
+  extra?: (state: OpenProjectState) => Partial<OpenProjectState>,
+) {
+  patchActive(set, get, (s) => {
+    const newObjects = mutator(s.project.objects)
+    const next = appendHistory(s, newObjects)
+    return { ...next, ...extra?.(s) }
+  })
+  const active = getActiveState(get())
+  if (active) set({ project: active.project })
+}
+
+function syncActiveProjectView(set: (p: Partial<ProjectStore>) => void, get: () => ProjectStore) {
+  const active = getActiveState(get())
+  if (active) {
+    set({
+      project: active.project,
+      selectedObjectIds: active.selectedObjectIds,
+      zoom: active.zoom,
+      panX: active.panX,
+      panY: active.panY,
+    })
+  }
+}
+
 export const useProjectStore = create<ProjectStore>((set, get) => ({
   openProjects: {},
   activeProjectId: null,
@@ -175,6 +274,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   leftPanelTab: 'layers',
   syncStatus: 'idle',
   editingTextId: null,
+  clipboard: null,
 
   setAppInitialized: (appInitialized) => set({ appInitialized, projectLoaded: appInitialized }),
 
@@ -185,7 +285,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     const openProjects = {
       ...state.openProjects,
       [project.id]: exists
-        ? { ...exists, project, loaded: true }
+        ? ensureHistoryFields({ ...exists, project, loaded: true })
         : createOpenProjectState(project),
     }
     const tabOrder = state.tabOrder.includes(project.id)
@@ -267,6 +367,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       ...s,
       project,
       syncStatus: 'synced',
+      ...createInitialHistory(project.objects),
     }))
     const active = getActiveState(get())
     if (active && get().activeProjectId === project.id) {
@@ -338,9 +439,137 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     set({ zoom: value })
   },
 
-  setPan: (panX, panY) => {
-    patchActive(set, get, (s) => ({ ...s, panX, panY }))
+  setPan: (panX, panY, options) => {
+    patchActive(set, get, (s) => ({
+      ...s,
+      panX,
+      panY,
+      userHasPanned: options?.userInitiated ? true : s.userHasPanned,
+    }))
     set({ panX, panY })
+  },
+
+  applyFitToView: (containerW, containerH) => {
+    const active = getActiveState(get())
+    if (!active) return
+    const padding = 40
+    const scaleX = (containerW - padding * 2) / active.project.width
+    const scaleY = (containerH - padding * 2) / active.project.height
+    const zoom = Math.min(4, Math.max(0.1, Math.min(scaleX, scaleY)))
+    const panX = (containerW - active.project.width * zoom) / 2
+    const panY = (containerH - active.project.height * zoom) / 2
+    patchActive(set, get, (s) => ({
+      ...s,
+      zoom,
+      panX,
+      panY,
+      userHasPanned: false,
+    }))
+    set({ zoom, panX, panY })
+  },
+
+  requestFitToView: () => {
+    patchActive(set, get, (s) => ({
+      ...s,
+      fitViewNonce: s.fitViewNonce + 1,
+      userHasPanned: false,
+    }))
+  },
+
+  pushHistory: () => {
+    patchActive(set, get, (s) => {
+      let history = s.history.slice(0, s.historyIndex + 1)
+      history.push(cloneObjects(s.project.objects))
+      if (history.length > HISTORY_LIMIT) {
+        history = history.slice(history.length - HISTORY_LIMIT)
+      }
+      return { ...s, history, historyIndex: history.length - 1 }
+    })
+  },
+
+  undo: () => {
+    patchActive(set, get, (s) => {
+      if (s.historyIndex <= 0) return s
+      const newIndex = s.historyIndex - 1
+      return {
+        ...s,
+        historyIndex: newIndex,
+        project: {
+          ...s.project,
+          objects: cloneObjects(s.history[newIndex]),
+        },
+        selectedObjectIds: [],
+      }
+    })
+    syncActiveProjectView(set, get)
+    const active = getActiveState(get())
+    if (active) set({ selectedObjectIds: active.selectedObjectIds })
+  },
+
+  redo: () => {
+    patchActive(set, get, (s) => {
+      if (s.historyIndex >= s.history.length - 1) return s
+      const newIndex = s.historyIndex + 1
+      return {
+        ...s,
+        historyIndex: newIndex,
+        project: {
+          ...s.project,
+          objects: cloneObjects(s.history[newIndex]),
+        },
+        selectedObjectIds: [],
+      }
+    })
+    syncActiveProjectView(set, get)
+    const active = getActiveState(get())
+    if (active) set({ selectedObjectIds: active.selectedObjectIds })
+  },
+
+  canUndo: () => {
+    const active = getActiveState(get())
+    return (active?.historyIndex ?? 0) > 0
+  },
+
+  canRedo: () => {
+    const active = getActiveState(get())
+    if (!active) return false
+    return active.historyIndex < active.history.length - 1
+  },
+
+  copySelectedObjects: () => {
+    const active = getActiveState(get())
+    if (!active?.selectedObjectIds.length) return
+    const copied = active.project.objects
+      .filter((o) => active.selectedObjectIds.includes(o.id))
+      .map((o) => structuredClone(o))
+    set({ clipboard: copied })
+  },
+
+  pasteObjects: (offset = { x: 20, y: 20 }) => {
+    const active = getActiveState(get())
+    const items = get().clipboard
+    if (!active || !items?.length) return
+
+    const newIds: string[] = []
+    let z = nextZIndex(active.project.objects)
+    const pasted = items.map((obj) => {
+      const id = createId(idPrefixForType(obj.type))
+      newIds.push(id)
+      z += 1
+      return {
+        ...structuredClone(obj),
+        id,
+        x: obj.x + offset.x,
+        y: obj.y + offset.y,
+        zIndex: z,
+      }
+    })
+
+    mutateObjects(set, get, (objects) => [...objects, ...pasted], () => ({
+      selectedObjectIds: newIds,
+    }))
+    const next = getActiveState(get())
+    if (next) set({ selectedObjectIds: newIds })
   },
 
   toggleGrid: () => {
@@ -379,60 +608,48 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     set({ selectedObjectIds: [], editingTextId: null })
   },
 
-  updateObject: (id, patch) => {
-    patchActive(set, get, (s) => ({
-      ...s,
-      project: {
-        ...s.project,
-        objects: s.project.objects.map((obj) =>
-          obj.id === id ? { ...obj, ...patch } : obj,
-        ),
-      },
-    }))
+  updateObject: (id, patch, options) => {
+    if (options?.skipHistory) {
+      patchActive(set, get, (s) => ({
+        ...s,
+        project: {
+          ...s.project,
+          objects: s.project.objects.map((obj) =>
+            obj.id === id ? { ...obj, ...patch } : obj,
+          ),
+        },
+      }))
+    } else {
+      mutateObjects(set, get, (objects) =>
+        objects.map((obj) => (obj.id === id ? { ...obj, ...patch } : obj)),
+      )
+    }
     const active = getActiveState(get())
     if (active) set({ project: active.project })
   },
 
   updateObjectStyle: (id, patch) => {
-    patchActive(set, get, (s) => ({
-      ...s,
-      project: {
-        ...s.project,
-        objects: s.project.objects.map((obj) =>
-          obj.id === id ? { ...obj, style: { ...obj.style, ...patch } } : obj,
-        ),
-      },
-    }))
-    const active = getActiveState(get())
-    if (active) set({ project: active.project })
+    mutateObjects(set, get, (objects) =>
+      objects.map((obj) =>
+        obj.id === id ? { ...obj, style: { ...obj.style, ...patch } } : obj,
+      ),
+    )
   },
 
   toggleObjectVisibility: (id) => {
-    patchActive(set, get, (s) => ({
-      ...s,
-      project: {
-        ...s.project,
-        objects: s.project.objects.map((obj) =>
-          obj.id === id ? { ...obj, visible: !obj.visible } : obj,
-        ),
-      },
-    }))
-    const active = getActiveState(get())
-    if (active) set({ project: active.project })
+    mutateObjects(set, get, (objects) =>
+      objects.map((obj) =>
+        obj.id === id ? { ...obj, visible: !obj.visible } : obj,
+      ),
+    )
   },
 
   toggleObjectLock: (id) => {
-    patchActive(set, get, (s) => ({
-      ...s,
-      project: {
-        ...s.project,
-        objects: s.project.objects.map((obj) =>
-          obj.id === id ? { ...obj, locked: !obj.locked } : obj,
-        ),
-      },
-    }))
-    const active = getActiveState(get())
-    if (active) set({ project: active.project })
+    mutateObjects(set, get, (objects) =>
+      objects.map((obj) =>
+        obj.id === id ? { ...obj, locked: !obj.locked } : obj,
+      ),
+    )
   },
 
   reorderObject: (id, direction) => {
@@ -445,16 +662,13 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     if (swapIndex < 0 || swapIndex >= sorted.length) return
     const current = sorted[index]
     const target = sorted[swapIndex]
-    const objects = active.project.objects.map((obj) => {
-      if (obj.id === current.id) return { ...obj, zIndex: target.zIndex }
-      if (obj.id === target.id) return { ...obj, zIndex: current.zIndex }
-      return obj
-    })
-    patchActive(set, get, (s) => ({
-      ...s,
-      project: { ...s.project, objects },
-    }))
-    set({ project: { ...active.project, objects } })
+    mutateObjects(set, get, (objects) =>
+      objects.map((obj) => {
+        if (obj.id === current.id) return { ...obj, zIndex: target.zIndex }
+        if (obj.id === target.id) return { ...obj, zIndex: current.zIndex }
+        return obj
+      }),
+    )
   },
 
   addAsset: (asset) => {
@@ -534,9 +748,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         crop: { ...DEFAULT_CROP },
       },
     }
-    patchActive(set, get, (s) => ({
-      ...s,
-      project: { ...s.project, objects: [...s.project.objects, obj] },
+    mutateObjects(set, get, (objects) => [...objects, obj], () => ({
       selectedObjectIds: [id],
     }))
     const next = getActiveState(get())
@@ -570,9 +782,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         opacity: 1,
       },
     }
-    patchActive(set, get, (s) => ({
-      ...s,
-      project: { ...s.project, objects: [...s.project.objects, obj] },
+    mutateObjects(set, get, (objects) => [...objects, obj], () => ({
       selectedObjectIds: [id],
     }))
     const next = getActiveState(get())
@@ -617,18 +827,17 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   },
 
   deleteSelectedObjects: () => {
-    patchActive(set, get, (s) => ({
-      ...s,
-      project: {
-        ...s.project,
-        objects: s.project.objects.filter(
-          (obj) => !s.selectedObjectIds.includes(obj.id),
-        ),
-      },
-      selectedObjectIds: [],
-    }))
     const active = getActiveState(get())
-    if (active) set({ project: active.project, selectedObjectIds: [] })
+    if (!active?.selectedObjectIds.length) return
+    const ids = new Set(active.selectedObjectIds)
+    mutateObjects(
+      set,
+      get,
+      (objects) => objects.filter((obj) => !ids.has(obj.id)),
+      () => ({ selectedObjectIds: [] }),
+    )
+    const next = getActiveState(get())
+    if (next) set({ project: next.project, selectedObjectIds: [] })
   },
 
   getAssetUrl: (asset) => {
