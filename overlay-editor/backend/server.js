@@ -31,6 +31,18 @@ import { exportProject, EXCEL_BIND_SCRIPT } from './generator/exportProject.js'
 import { resolveProjectBindings } from './services/bindingResolver.js'
 import { getWorkbookSchema } from './services/excelService.js'
 import { excelDebug } from './utils/excelDebug.js'
+import { fileExistsAt } from './utils/bindingPath.js'
+
+const IMAGE_SRC_HELPER = `
+function resolveExcelImageSrc(next) {
+  if (!next) return next;
+  if (next.indexOf('local-media:') === 0) {
+    var projectId = (location.pathname.split('/')[2] || '');
+    return '/api/projects/' + projectId + '/local-file?path=' +
+      encodeURIComponent(next.slice('local-media:'.length));
+  }
+  return next;
+}`
 
 const PORT = 3000
 const app = express()
@@ -43,6 +55,7 @@ const liveReloadClients = new Set()
 const LIVE_RELOAD_SCRIPT = `(function () {
   var ws;
   var cssLink = document.querySelector('link[rel="stylesheet"]');
+  ${IMAGE_SRC_HELPER}
   function connect() {
     ws = new WebSocket('ws://' + location.hostname + ':${PORT}/live');
     ws.onmessage = function (event) {
@@ -63,7 +76,7 @@ const LIVE_RELOAD_SCRIPT = `(function () {
                 document.querySelectorAll('[data-excel-bind="' + id + '"]').forEach(function (el) {
                   var kind = el.getAttribute('data-excel-bind-kind');
                   if (kind === 'image' || el.tagName === 'IMG') {
-                    var next = values[id];
+                    var next = resolveExcelImageSrc(values[id]);
                     if (!next) return;
                     var sep = next.indexOf('?') >= 0 ? '&' : '?';
                     el.setAttribute('src', next + sep + 't=' + Date.now());
@@ -441,6 +454,85 @@ app.post(
     }
   },
 )
+
+const MIME_BY_EXT = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+}
+
+app.get('/api/projects/:id/local-file', async (req, res) => {
+  try {
+    const projectId = req.params.id
+    const rawPath = req.query.path
+    if (!rawPath || typeof rawPath !== 'string') {
+      return res.status(400).json({ error: 'path query is required' })
+    }
+
+    await loadProject(projectId)
+
+    const fullPath = path.resolve(rawPath)
+    if (!path.isAbsolute(fullPath)) {
+      return res.status(400).json({ error: 'Absolute path required' })
+    }
+
+    if (!fileExistsAt(fullPath)) {
+      excelDebug('local media not found', { projectId, path: fullPath })
+      return res.status(404).json({ error: 'File not found' })
+    }
+
+    const ext = path.extname(fullPath).toLowerCase()
+    res.type(MIME_BY_EXT[ext] ?? 'application/octet-stream')
+    res.sendFile(fullPath)
+  } catch (err) {
+    excelDebug('local media serve error', {
+      projectId: req.params.id,
+      path: req.query.path,
+      error: err.message,
+    })
+    res.status(404).json({ error: 'File not found' })
+  }
+})
+
+app.get('/api/projects/:id/files/*splat', async (req, res) => {
+  try {
+    const projectId = req.params.id
+    const relPath = String(req.params.splat ?? '')
+      .replace(/\\/g, '/')
+      .replace(/^\/+/, '')
+    if (!relPath) return res.status(400).json({ error: 'Missing file path' })
+
+    await loadProject(projectId)
+    const projectDir = path.resolve(getProjectDir(projectId))
+    const fullPath = path.resolve(projectDir, relPath)
+
+    if (
+      fullPath !== projectDir &&
+      !fullPath.startsWith(projectDir + path.sep)
+    ) {
+      return res.status(403).json({ error: 'Forbidden' })
+    }
+
+    if (!fileExists(projectDir, relPath)) {
+      excelDebug('media not found', { projectId, relPath })
+      return res.status(404).json({ error: 'File not found' })
+    }
+
+    const ext = path.extname(fullPath).toLowerCase()
+    res.type(MIME_BY_EXT[ext] ?? 'application/octet-stream')
+    res.sendFile(fullPath)
+  } catch (err) {
+    excelDebug('media serve error', {
+      projectId: req.params.id,
+      path: req.params.splat,
+      error: err.message,
+    })
+    res.status(404).json({ error: 'File not found' })
+  }
+})
 
 app.use('/preview/:id', async (req, res, next) => {
   const projectDir = getProjectDir(req.params.id)

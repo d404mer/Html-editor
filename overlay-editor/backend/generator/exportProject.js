@@ -1,3 +1,6 @@
+import { resolveImageDisplayPath, mediaRefToDisplaySrc } from '../utils/bindingPath.js'
+import { getProjectDir } from '../storage/projectManager.js'
+
 function escapeHtml(text) {
   return String(text)
     .replace(/&/g, '&amp;')
@@ -17,12 +20,20 @@ function getDisplayTextForObject(obj, resolvedValues) {
 function getImageSrcForObject(obj, project, resolvedValues) {
   if (obj.type !== 'image' && obj.type !== 'gif') return ''
   const asset = project.assets.find((a) => a.id === obj.assetId)
+  const mediaCtx = {
+    projectId: project.id,
+    projectDir: getProjectDir(project.id),
+    assets: project.assets ?? [],
+  }
+
   if (obj.imageBinding) {
     const resolved = resolvedValues[obj.id]
-    if (resolved) return resolved.replace(/\\/g, '/')
-    if (obj.imageBinding.fallback) return obj.imageBinding.fallback.replace(/\\/g, '/')
-    if (asset) return asset.path.replace(/\\/g, '/')
-    return ''
+    if (resolved) {
+      return mediaRefToDisplaySrc(project.id, resolved, { forPreviewHtml: true })
+    }
+    return (
+      resolveImageDisplayPath('', obj.imageBinding, asset?.path, mediaCtx) || ''
+    ).replace(/\\/g, '/')
   }
   if (!asset) return ''
   return asset.path.replace(/\\/g, '/')
@@ -259,13 +270,23 @@ export function exportProject(project, resolvedValues = {}) {
 
 export const EXCEL_BIND_SCRIPT = `(function () {
   var POLL_MS = 2000;
+  var LOCAL_PREFIX = 'local-media:';
+  function resolveExcelImageSrc(next) {
+    if (!next) return next;
+    if (next.indexOf(LOCAL_PREFIX) === 0) {
+      var projectId = (location.pathname.split('/')[2] || '');
+      return '/api/projects/' + projectId + '/local-file?path=' +
+        encodeURIComponent(next.slice(LOCAL_PREFIX.length));
+    }
+    return next;
+  }
   function applyValues(values) {
     if (!values) return;
     Object.keys(values).forEach(function (id) {
       document.querySelectorAll('[data-excel-bind="' + id + '"]').forEach(function (el) {
         var kind = el.getAttribute('data-excel-bind-kind');
         if (kind === 'image' || el.tagName === 'IMG') {
-          var next = values[id];
+          var next = resolveExcelImageSrc(values[id]);
           if (!next) return;
           var sep = next.indexOf('?') >= 0 ? '&' : '?';
           el.setAttribute('src', next + sep + 't=' + Date.now());

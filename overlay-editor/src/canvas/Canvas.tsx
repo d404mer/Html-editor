@@ -341,7 +341,11 @@ export default function Canvas() {
                   displayImagePath={getObjectDisplayImagePath(
                     obj,
                     excelValues,
-                    asset?.path,
+                    {
+                      projectId: project.id,
+                      assets: project.assets,
+                      assetPath: asset?.path,
+                    },
                   )}
                   selected={selectedObjectIds.includes(obj.id)}
                   onSelect={selectObject}

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { useProjectStore } from '../store/projectStore'
 import { useDataLiveUpdates } from './useDataLiveUpdates'
 import { excelDebug } from '../utils/excelDebug'
+import { resolveImageDisplayPath } from '../utils/bindingPath'
+import type { Asset, CanvasObject } from '../types/project'
 
 const POLL_INTERVAL_MS = 10_000
 
@@ -95,9 +97,6 @@ export function useExcelValues(): Record<string, string> {
   return values
 }
 
-import { resolveImageDisplayPath } from '../utils/bindingPath'
-import type { CanvasObject } from '../types/project'
-
 export function getObjectDisplayText(
   object: { id: string; type: string; text?: string; textBinding?: { fallback?: string } },
   excelValues: Record<string, string>,
@@ -112,13 +111,14 @@ export function getObjectDisplayText(
 export function getObjectDisplayImagePath(
   object: CanvasObject,
   excelValues: Record<string, string>,
-  assetPath?: string,
+  ctx: { projectId: string; assets?: Asset[]; assetPath?: string },
 ): string {
-  if (object.type !== 'image' && object.type !== 'gif') return assetPath ?? ''
-  if (!object.imageBinding) return assetPath ?? ''
+  if (object.type !== 'image' && object.type !== 'gif') return ctx.assetPath ?? ''
+  if (!object.imageBinding) return ctx.assetPath ?? ''
   return resolveImageDisplayPath(
     excelValues[object.id],
     object.imageBinding,
-    assetPath,
+    ctx.assetPath,
+    { projectId: ctx.projectId, assets: ctx.assets },
   )
 }

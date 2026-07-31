@@ -1,18 +1,21 @@
 import {
   getDataFilePath,
+  getProjectDir,
 } from '../storage/projectManager.js'
 import {
   resolveBindingFromFile,
 } from '../services/excelService.js'
 import {
   resolveImageDisplayPath,
+  fileExists,
+  parseLocalMediaRef,
 } from '../utils/bindingPath.js'
 import { excelDebug } from '../utils/excelDebug.js'
 
 /**
  * @param {object} project
  * @param {object} obj
- * @param {import('../types').ExcelBinding} binding
+ * @param {object} binding
  */
 function resolveObjectBinding(project, obj, binding) {
   const dataFile = (project.dataFiles ?? []).find((f) => f.id === binding.fileId)
@@ -25,20 +28,27 @@ function resolveObjectBinding(project, obj, binding) {
     return binding.fallback ?? (obj.type === 'text' ? obj.text ?? '' : '')
   }
 
+  const mediaCtx = {
+    projectId: project.id,
+    projectDir: getProjectDir(project.id),
+    assets: project.assets ?? [],
+  }
+
   try {
     const filePath = getDataFilePath(project.id, dataFile)
     const raw = resolveBindingFromFile(filePath, binding)
     if (obj.type === 'image' || obj.type === 'gif') {
       const asset = project.assets.find((a) => a.id === obj.assetId)
-      const value = resolveImageDisplayPath(raw, binding, asset?.path)
-
-      // Добавляем строки отладки
-      excelDebug('resolve image: raw', { objectId: obj.id, file: dataFile.name, binding, raw });
-      console.log('resolveImageDisplayPath: raw:', raw);
-
-      excelDebug('resolve image: value', { objectId: obj.id, file: dataFile.name, binding, value });
-      console.log('resolveImageDisplayPath: value:', value);
-
+      const value = resolveImageDisplayPath(raw, binding, asset?.path, mediaCtx)
+      const localAbs = value ? parseLocalMediaRef(value) : null
+      excelDebug('resolve image: ok', {
+        objectId: obj.id,
+        file: dataFile.name,
+        raw,
+        value,
+        external: Boolean(localAbs),
+        exists: value ? fileExists(mediaCtx.projectDir, value) : false,
+      })
       return value
     }
     const value = raw || binding.fallback || obj.text || ''
@@ -57,7 +67,7 @@ function resolveObjectBinding(project, obj, binding) {
     })
     if (obj.type === 'image' || obj.type === 'gif') {
       const asset = project.assets.find((a) => a.id === obj.assetId)
-      return resolveImageDisplayPath('', binding, asset?.path)
+      return resolveImageDisplayPath('', binding, asset?.path, mediaCtx)
     }
     return binding.fallback ?? obj.text ?? ''
   }
@@ -65,7 +75,7 @@ function resolveObjectBinding(project, obj, binding) {
 
 /**
  * @param {object} project
- * @returns {Record<string, string>} objectId -> resolved text or image path
+ * @returns {Record<string, string>}
  */
 export function resolveProjectBindings(project) {
   /** @type {Record<string, string>} */
@@ -112,7 +122,10 @@ export function getDisplayImagePath(project, objectId, resolvedValues) {
     resolvedValues[objectId],
     obj.imageBinding,
     asset?.path,
+    {
+      projectId: project.id,
+      projectDir: getProjectDir(project.id),
+      assets: project.assets ?? [],
+    },
   )
 }
-
-

@@ -11,7 +11,9 @@ export function useImage(src: string | undefined): HTMLImageElement | null {
 
     let cancelled = false
     const img = new window.Image()
-    img.crossOrigin = 'anonymous'
+    if (/^https?:\/\//i.test(src)) {
+      img.crossOrigin = 'anonymous'
+    }
     img.src = src
 
     img.onload = () => {

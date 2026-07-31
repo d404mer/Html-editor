@@ -413,9 +413,10 @@ function ExcelBindingPanel({
 
           {object.type !== 'text' && (
             <span className="field-hint">
-              В Excel укажите путь относительно проекта, например{' '}
-              <code className="inline-code">assets/images/logo.png</code> или только{' '}
-              <code className="inline-code">logo.png</code>
+              В Excel укажите путь к файлу: относительный (
+              <code className="inline-code">assets/images/logo.png</code>,{' '}
+              <code className="inline-code">logo.png</code>), полный путь на ПК (
+              <code className="inline-code">C:\Users\...\photo.png</code>) или URL
             </span>
           )}
 
@@ -464,7 +465,11 @@ function ImageExcelBindingInspector({ object }: { object: CanvasObject }) {
   const setImageBinding = useProjectStore((s) => s.setImageBinding)
   const excelValues = useExcelValues()
   const asset = project.assets.find((a) => a.id === object.assetId)
-  const preview = getObjectDisplayImagePath(object, excelValues, asset?.path)
+  const preview = getObjectDisplayImagePath(object, excelValues, {
+    projectId: project.id,
+    assets: project.assets,
+    assetPath: asset?.path,
+  })
 
   return (
     <ExcelBindingPanel
